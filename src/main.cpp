@@ -8,6 +8,7 @@
 #include "generator_data.h"
 
 int main() {
+    srand(time(0));
     GeneratorData data;
     data.Generate();
     std::cout << "success\n";

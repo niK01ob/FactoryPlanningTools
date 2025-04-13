@@ -10,12 +10,12 @@ public:
     // здесь будем парсить данные из файла
     ProblemData(){}
     ProblemData(std::ifstream& input);
-    ProblemData(ProblemData& data) {
+    /*ProblemData(ProblemData& data) {
         this->operations = data.operations;
         this->works = data.works;
         this->times_matrix = data.times_matrix;
         this->tools = data.tools;
-    };
+    };*/
     /*ProblemData(const ProblemData& other)
         : works(other.works),
           operations(other.operations),
