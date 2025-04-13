@@ -21,6 +21,14 @@ struct Operation {
             throw std::runtime_error("Операция не назначена");
         }
     }
+
+   /*Operation& operator= (const Operation& oper) {
+        this->start_time = oper.start_time;
+        this->end_time = oper.end_time;
+        this->stoppable = oper.stoppable;
+        this->previous_op_id = oper.previous_op_id;
+        this->possible_tools = oper.possible_tools;
+    }*/
 };
 
 // такая структура Work должна быть круче

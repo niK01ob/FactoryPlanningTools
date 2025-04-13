@@ -186,6 +186,9 @@ public:
 private:
     std::set<Tool::TimeInterval>::const_iterator GetStartIterator(
         uint64_t timestamp) {
+        if(shedule_.empty()) {
+            return shedule_.end();
+        }
         TimeInterval interval{timestamp, timestamp};
         auto it = shedule_.lower_bound(interval);
 

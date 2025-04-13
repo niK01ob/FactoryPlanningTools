@@ -20,7 +20,7 @@ public:
             timestamps.erase(timestamps.begin());
             for (auto& work : data->works) {
                 for (auto& op_idx : work.operation_ids) {
-                    if (work.CanBeAppointed(op_idx, current_time)) {
+                    if (data->operations[op_idx].end_time == 0 && work.CanBeAppointed(op_idx, current_time)) {
                         F.push_back(op_idx);
                     }
                 }
@@ -39,6 +39,7 @@ public:
             }
 
             for (size_t oper_in_f : F) {
+
                 Operation& cool_operation = data->operations[oper_in_f];
                 for (size_t r : R) {
                     if (cool_operation.possible_tools.contains(r)) {

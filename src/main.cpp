@@ -5,15 +5,21 @@
 
 #include "solver.h"
 #include "solution_checker.h"
+#include "generator_data.h"
 
 int main() {
-    std::ifstream input_file("../test_data/data.DAT");
+    GeneratorData data;
+    data.Generate();
+    std::cout << "success\n";
+    /*std::ifstream input_file("../test_data/data.DAT");
     ProblemData test_data(input_file);
     input_file.close();
+    Solver::Solve(&test_data);*/
+    ProblemData test_data((*data.GetData()));
     Solver::Solve(&test_data);
 
     std::cout << "Shedules:\n";
-    for (auto& tool : test_data.tools) {
+    for (auto& tool : (test_data).tools) {
         tool.PrintShedule(std::cout);
         std::cout << "\n";
     }
