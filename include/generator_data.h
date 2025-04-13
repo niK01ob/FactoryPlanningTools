@@ -9,9 +9,9 @@ const uint64_t minTimeStep_ = 10;
 const uint64_t maxTimeStep_ = 20;
 const uint64_t minTimeWork_ = 30;
 const uint64_t maxTimeWork_ = 50;
-const uint64_t cntMix = 10;
+const uint64_t cntMix = 0;
 const uint64_t cntAddings = 0;
-const uint64_t prOperationStep = 3;
+const uint64_t prOperationStep = 20; 
 
 class GeneratorData{
 public:
@@ -25,7 +25,9 @@ private:
         uint64_t start_;
         uint64_t end_;
         size_t idTool_;
-        uint64_t idOper_;
+        size_t idOper_;
+        std::set<size_t> prevInArray_;
+        std::set<size_t> prev_;
         GarbageO(bool continous, uint64_t time, uint64_t start, uint64_t end, uint64_t idTool) :
             continous_(continous), time_(time), start_(start), end_(end), idTool_(idTool) {}
     };
@@ -34,13 +36,16 @@ private:
     std::vector<size_t> indOperations_;
     std::vector<GarbageO> vecGarb_;
     std::vector<std::set<Tool::TimeInterval>> shedule;
+    std::vector<int> was_;
     void Clear();
     void GenerateFirstTools();
     void GenerateOperations();
     void BuildGarbage();
+    void BuildPrevOper();
     void GenerateWork();
     void MixOperation();
     void AddIntervals();
+    void dfs(size_t x, std::set<size_t>& s);
 };
 
 void GeneratorData::Clear() {
@@ -57,7 +62,6 @@ void GeneratorData::Generate() {
     GenerateFirstTools();
     GenerateOperations();
 
-    //MixOperation();
     AddIntervals();
     GenerateWork();
 }
@@ -76,12 +80,7 @@ void GeneratorData::GenerateFirstTools() {
             stTime = enTime + minTimeStep_ + rand() % (maxTimeStep_ - minTimeStep_ + 1);
             enTime = stTime + minTimeWork_ + rand() % (maxTimeWork_ - minTimeWork_ + 1);
             shedule[tool].insert(Tool::TimeInterval(stTime, enTime));
-            //operation / matrix
-
-            //tmpOperations_.push_back(Operation{false, {}, {(uint64_t)tool}});
-            //data_.times_matrix[tmpOperations_.size() - 1][tool] = enTime - stTime;
         }
-        //data_.tools.push_back(shedule);
     }
 }
 //делаем операции прерываеммыми
@@ -99,7 +98,7 @@ void GeneratorData::BuildGarbage() {
                 startTime = timeInterval.start;
             }
             endTime = timeInterval.end;
-            if (rand() % 2) {
+            if (rand() % 2 || true) {
                 vecGarb_.push_back(GarbageO{continous, timeOperation, startTime, endTime, tool});
                 continous = false;
                 timeOperation = 0;
@@ -117,17 +116,30 @@ void GeneratorData::BuildGarbage() {
     }
 }
 
+void GeneratorData::BuildPrevOper() {
+    std::sort(vecGarb_.begin(), vecGarb_.end(), [](GarbageO a, GarbageO b){ if(a.start_ != b.start_) return a.start_ < b.start_; return a.end_ < b.end_; });
+
+    for (int i = 0; i < (int)vecGarb_.size(); ++i) {
+        for (int j = std::max(0, (int)i - (int)prOperationStep); j < i; ++j) {
+            if (vecGarb_[j].end_ < vecGarb_[i].start_) {
+                vecGarb_[i].prev_.insert(vecGarb_[j].idOper_);
+                vecGarb_[i].prev_.insert(j);
+            }
+        }
+    }
+}
+
 void GeneratorData::GenerateOperations() {
     BuildGarbage();
     MixOperation();
     for (size_t i = 0; i < vecGarb_.size(); ++i) {
         vecGarb_[i].idOper_ = i;
     } 
-    std::sort(vecGarb_.begin(), vecGarb_.end(), [](GarbageO a, GarbageO b){ if(a.start_ != b.start_) return a.start_ < b.start_; return a.end_ < b.end_; });
-    //std::set<std::vector<uint64_t>> sOper;
+    BuildPrevOper();
+    
     indOperations_.resize(vecGarb_.size());
     for (size_t i = 0; i < vecGarb_.size(); ++i) {
-        tmpOperations_.push_back(Operation{vecGarb_[i].continous_, {}, {vecGarb_[i].idTool_}});
+        tmpOperations_.push_back(Operation{ vecGarb_[i].continous_, vecGarb_[i].prev_, {vecGarb_[i].idTool_}});
         data_.times_matrix[vecGarb_[i].idOper_][vecGarb_[i].idTool_] = vecGarb_[i].time_;
         indOperations_[vecGarb_[i].idOper_] = i;
     }
@@ -138,30 +150,14 @@ void GeneratorData::GenerateOperations() {
 
 //меняем порядок операций
 void GeneratorData::MixOperation() {
-    /*for (size_t i = 0; i < tmpOperations_.size(); ++i) {
-        indOperations_.push_back(i);
-    }*/
     for (uint64_t i = 0; i < cntMix; ++i) {
         int id1 = rand() % vecGarb_.size();
         int id2 = rand() % vecGarb_.size();
         std::swap(vecGarb_[id1], vecGarb_[id2]);
-        //std::swap(data_.times_matrix[id1], data_.times_matrix[id2]);
     }
-    /*for (size_t i = 0; i < tmpOperations_.size(); ++i) {
-        data_.operations.push_back(tmpOperations_[indOperations_[i]]);
-    }*/
 }
 
-//делаем работы
-void GeneratorData::GenerateWork() {
-    std::set<size_t> needOp;
-    for (size_t i = 0; i < data_.operations.size(); ++i) {
-        needOp.insert(i);
-    }
-    data_.works.push_back(Work{0, 0, 100, needOp, data_.operations});
-}
-
-//увеличиваем кол-во итнервалы распмсания
+//увеличиваем кол-во итнервалы распbсания
 void GeneratorData::AddIntervals() {
     for (size_t i = 0; i < shedule.size(); ++i) {
         uint64_t stTime = (*shedule[i].rbegin()).start;
@@ -172,5 +168,28 @@ void GeneratorData::AddIntervals() {
             shedule[i].insert(Tool::TimeInterval(stTime, enTime));
         }
         data_.tools.push_back(shedule[i]);
+    }
+}
+
+//делаем работы
+void GeneratorData::GenerateWork() {
+    was_.resize(vecGarb_.size(), 0);
+    for (int i = (int)vecGarb_.size() - 1; i >= 0; i--) {
+        if(!was_[i]) {
+            std::set<size_t> s;
+            dfs(i, s);
+            data_.works.push_back(Work{0, 0, 100, s, data_.operations});
+        }
+    }
+    
+}
+
+void GeneratorData::dfs(size_t x, std::set<size_t>& s) {
+    was_[x] = 1;
+    s.insert(vecGarb_[x].idOper_);
+    for (auto e : vecGarb_[x].prevInArray_) {
+        if (!was_[e]) {
+            dfs(e, s);
+        }
     }
 }
