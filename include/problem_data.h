@@ -8,7 +8,14 @@
 class ProblemData {
 public:
     // здесь будем парсить данные из файла
+    ProblemData(){}
     ProblemData(std::ifstream& input);
+    /*ProblemData(ProblemData& data) {
+        this->operations = data.operations;
+        this->works = data.works;
+        this->times_matrix = data.times_matrix;
+        this->tools = data.tools;
+    };*/
     /*ProblemData(const ProblemData& other)
         : works(other.works),
           operations(other.operations),
@@ -36,7 +43,7 @@ public:
     // матрица времён выполнения i-ой Operation на j-м ресурсе
     std::vector<std::vector<uint64_t>> times_matrix;
 
-private:
+protected:
     // нужно только на время парсинга
     std::vector<bool> oper_stoppabillity_;
     std::vector<uint64_t> work_starts_;
@@ -95,7 +102,7 @@ ProblemData::ProblemData(std::ifstream& input) {
 
     for (size_t i = 0; i < idx_work_; ++i) {
         works.push_back(Work{work_starts_[i], work_direct_[i], work_fines_[i],
-                             work_operations_[i], operations});
+                             work_operations_[i]});
     }
     
 }

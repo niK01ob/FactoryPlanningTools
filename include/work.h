@@ -21,6 +21,14 @@ struct Operation {
             throw std::runtime_error("Операция не назначена");
         }
     }
+
+   /*Operation& operator= (const Operation& oper) {
+        this->start_time = oper.start_time;
+        this->end_time = oper.end_time;
+        this->stoppable = oper.stoppable;
+        this->previous_op_id = oper.previous_op_id;
+        this->possible_tools = oper.possible_tools;
+    }*/
 };
 
 // такая структура Work должна быть круче
@@ -32,30 +40,24 @@ public:
     const std::set<size_t> operation_ids;
 
     Work(uint64_t start_time, uint64_t directive, double fine_coef,
-         const std::set<size_t>& operation_ids,
-         const std::vector<Operation>& ref_to_all_opers)
+         const std::set<size_t>& operation_ids)
         : start_time(start_time),
           directive(directive),
           fine_coef(fine_coef),
-          operation_ids(operation_ids),
-          ref_to_all_opers_(ref_to_all_opers) {}
+          operation_ids(operation_ids) {}
 
-    bool CanBeAppointed(size_t oper_id, uint64_t timestamp) const{
+    bool CanBeAppointed(size_t oper_id, uint64_t timestamp, const std::vector<Operation>& opers) const{
         if (!operation_ids.contains(oper_id) || timestamp < start_time) {
             return false;
         }
-
-        const auto& oper = ref_to_all_opers_[oper_id];
+        const auto& oper = opers[oper_id];
         for (auto prev : oper.previous_op_id) {
-            if (ref_to_all_opers_[prev].end_time == 0 ||
-                ref_to_all_opers_[prev].end_time > timestamp) {
+            if (opers[prev].end_time == 0 ||
+                opers[prev].end_time > timestamp) {
                 return false;
             }
         }
 
         return oper.start_time == 0;
     }
-
-private:
-    const std::vector<Operation>& ref_to_all_opers_;
 };
