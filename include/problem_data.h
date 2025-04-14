@@ -102,7 +102,7 @@ ProblemData::ProblemData(std::ifstream& input) {
 
     for (size_t i = 0; i < idx_work_; ++i) {
         works.push_back(Work{work_starts_[i], work_direct_[i], work_fines_[i],
-                             work_operations_[i], operations});
+                             work_operations_[i]});
     }
     
 }

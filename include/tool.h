@@ -58,6 +58,7 @@ public:
         return *this;
     }
 
+    // true
     bool CanStartWork(const Operation& operation, uint64_t timestamp,
                       uint64_t timespan) {
         auto it = GetStartIterator(timestamp);

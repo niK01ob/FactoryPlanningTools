@@ -1,17 +1,17 @@
 #include "problem_data.h"
 #include <algorithm>
 
-const uint64_t minCntTool_ = 2;
-const uint64_t maxCntTool_ = 5;
-const uint64_t minCntIntervals_ = 3;
-const uint64_t maxCntIntervals_ = 7;
-const uint64_t minTimeStep_ = 10;
-const uint64_t maxTimeStep_ = 20;
-const uint64_t minTimeWork_ = 30;
-const uint64_t maxTimeWork_ = 50;
-const uint64_t cntMix = 0;
-const uint64_t cntAddings = 0;
-const uint64_t prOperationStep = 20; 
+const uint64_t minCntTool_ = 5;
+const uint64_t maxCntTool_ = 10;
+const uint64_t minCntIntervals_ = 5;
+const uint64_t maxCntIntervals_ = 10;
+const uint64_t minTimeStep_ = 20;
+const uint64_t maxTimeStep_ = 70;
+const uint64_t minTimeWork_ = 50;
+const uint64_t maxTimeWork_ = 100;
+const uint64_t cntMix = 1000;
+const uint64_t cntAddings = 10;
+const uint64_t prOperationStep = 5; 
 
 class GeneratorData{
 public:
@@ -45,7 +45,7 @@ private:
     void GenerateWork();
     void MixOperation();
     void AddIntervals();
-    void dfs(size_t x, std::set<size_t>& s);
+    void dfs(size_t x, std::set<size_t>& s, uint64_t& st_time, uint64_t& directive_time);
 };
 
 void GeneratorData::Clear() {
@@ -98,7 +98,7 @@ void GeneratorData::BuildGarbage() {
                 startTime = timeInterval.start;
             }
             endTime = timeInterval.end;
-            if (rand() % 2 || true) {
+            if (rand() % 2) {
                 vecGarb_.push_back(GarbageO{continous, timeOperation, startTime, endTime, tool});
                 continous = false;
                 timeOperation = 0;
@@ -119,11 +119,11 @@ void GeneratorData::BuildGarbage() {
 void GeneratorData::BuildPrevOper() {
     std::sort(vecGarb_.begin(), vecGarb_.end(), [](GarbageO a, GarbageO b){ if(a.start_ != b.start_) return a.start_ < b.start_; return a.end_ < b.end_; });
 
-    for (int i = 0; i < (int)vecGarb_.size(); ++i) {
-        for (int j = std::max(0, (int)i - (int)prOperationStep); j < i; ++j) {
+    for (size_t i = 0; i < vecGarb_.size(); ++i) {
+        for (size_t j = i % prOperationStep; j < i; j += prOperationStep) {
             if (vecGarb_[j].end_ < vecGarb_[i].start_) {
                 vecGarb_[i].prev_.insert(vecGarb_[j].idOper_);
-                vecGarb_[i].prev_.insert(j);
+                vecGarb_[i].prevInArray_.insert(j);
             }
         }
     }
@@ -139,7 +139,7 @@ void GeneratorData::GenerateOperations() {
     
     indOperations_.resize(vecGarb_.size());
     for (size_t i = 0; i < vecGarb_.size(); ++i) {
-        tmpOperations_.push_back(Operation{ vecGarb_[i].continous_, vecGarb_[i].prev_, {vecGarb_[i].idTool_}});
+        tmpOperations_.push_back(Operation{vecGarb_[i].continous_, vecGarb_[i].prev_, {vecGarb_[i].idTool_}});
         data_.times_matrix[vecGarb_[i].idOper_][vecGarb_[i].idTool_] = vecGarb_[i].time_;
         indOperations_[vecGarb_[i].idOper_] = i;
     }
@@ -174,22 +174,28 @@ void GeneratorData::AddIntervals() {
 //делаем работы
 void GeneratorData::GenerateWork() {
     was_.resize(vecGarb_.size(), 0);
+
     for (int i = (int)vecGarb_.size() - 1; i >= 0; i--) {
         if(!was_[i]) {
             std::set<size_t> s;
-            dfs(i, s);
-            data_.works.push_back(Work{0, 0, 100, s, data_.operations});
+            uint64_t st = vecGarb_[i].start_;
+            uint64_t direct = vecGarb_[i].end_;
+            dfs(i, s, st, direct);
+            data_.works.push_back(Work{st, direct, 100, s});
         }
     }
+
     
 }
 
-void GeneratorData::dfs(size_t x, std::set<size_t>& s) {
+void GeneratorData::dfs(size_t x, std::set<size_t>& s, uint64_t& st_time, uint64_t& directive_time) {
     was_[x] = 1;
+    st_time = std::min(st_time, vecGarb_[x].start_);
+    directive_time = std::max(directive_time, vecGarb_[x].start_);
     s.insert(vecGarb_[x].idOper_);
     for (auto e : vecGarb_[x].prevInArray_) {
-        if (!was_[e]) {
-            dfs(e, s);
+        if (was_[e] == 0) {
+            dfs(e, s, st_time, directive_time);
         }
     }
 }
