@@ -26,4 +26,10 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 add_executable(${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_executable(${PROJECT_NAME}.tests ${CMAKE_SOURCE_DIR}/tests/test_main.cpp)
 
-target_link_libraries(${PROJECT_NAME}.tests gtest gmock pthread)
+find_package(GTest CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME}.tests
+    PRIVATE
+    GTest::gtest
+    GTest::gmock
+    GTest::gtest_main
+)

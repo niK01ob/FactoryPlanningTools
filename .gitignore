@@ -1,3 +1,7 @@
 /FactoryPlanning/.vs
 build
+build-gcc
 .vs
+baseline_results_*.csv
+experiment_config.yaml
+pdf_extracted.txt

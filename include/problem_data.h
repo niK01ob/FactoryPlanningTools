@@ -215,7 +215,7 @@ void ProblemData::fillStart(std::ifstream& input) {
 
 void ProblemData::fillDirective(std::ifstream& input) {
     std::string str;
-    for (size_t i = 0; i < works.size(); ++i) {
+    for (size_t i = 0; i < work_direct_.size(); ++i) {
         input >> str;
         work_direct_[i] = std::stoi(str);
     }
@@ -223,7 +223,7 @@ void ProblemData::fillDirective(std::ifstream& input) {
 
 void ProblemData::fillFines(std::ifstream& input) {
     std::string str;
-    for (size_t i = 0; i < works.size(); ++i) {
+    for (size_t i = 0; i < work_fines_.size(); ++i) {
         input >> str;
         work_fines_[i] = std::stod(str);
     }

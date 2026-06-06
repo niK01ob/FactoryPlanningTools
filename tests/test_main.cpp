@@ -89,14 +89,32 @@ TEST(Updated_parser, base_parsing) {
     std::ifstream input_file("../test_data/data.DAT");
     ProblemData test_data(input_file);
     input_file.close();
-    ASSERT_EQ(test_data.operations.size(), 5);
-    ASSERT_EQ(test_data.tools.size(), 3);
-    ASSERT_EQ(test_data.works.size(), 2);
+    ASSERT_EQ(test_data.operations.size(), 5u);
+    ASSERT_EQ(test_data.tools.size(), 3u);
+    ASSERT_EQ(test_data.works.size(), 2u);
     std::vector<std::vector<uint64_t>> true_times{
         {0, 20, 10}, {10, 0, 40}, {10, 0, 0}, {0, 0, 40}, {20, 30, 0}};
     CompareMatrix(test_data.times_matrix, true_times);
 
     EXPECT_TRUE((test_data.operations.begin()->possible_tools == std::set<size_t>{1, 2}));
+
+    // START / DIRECTIVE / FINES must be parsed before works are assembled.
+    ASSERT_EQ(test_data.works.size(), 2u);
+    EXPECT_EQ(test_data.works[0].start_time, 10u);
+    EXPECT_EQ(test_data.works[1].start_time, 30u);
+    EXPECT_EQ(test_data.works[0].directive, 100u);
+    EXPECT_EQ(test_data.works[1].directive, 120u);
+    EXPECT_DOUBLE_EQ(test_data.works[0].fine_coef, 5.0);
+    EXPECT_DOUBLE_EQ(test_data.works[1].fine_coef, 3.0);
+
+    // Graph consistency according to current parser semantics
+    // (first vertex depends on second in each pair from data.DAT):
+    // 0 depends on 1, 1 depends on 2, 3 depends on 4
+    EXPECT_TRUE((test_data.operations[0].previous_op_id == std::set<size_t>{1}));
+    EXPECT_TRUE((test_data.operations[1].previous_op_id == std::set<size_t>{2}));
+    EXPECT_TRUE(test_data.operations[2].previous_op_id.empty());
+    EXPECT_TRUE((test_data.operations[3].previous_op_id == std::set<size_t>{4}));
+    EXPECT_TRUE(test_data.operations[4].previous_op_id.empty());
 }
 
 TEST(Appoint__Test, simple) {
