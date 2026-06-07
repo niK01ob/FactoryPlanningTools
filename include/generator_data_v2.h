@@ -122,10 +122,10 @@ public:
         }
 
         if (preset == DifficultyPreset::Medium) {
-            params_.min_tools = 50;
-            params_.max_tools = 68;
-            params_.min_intervals_per_tool = 120;
-            params_.max_intervals_per_tool = 175;
+            params_.min_tools = 46;
+            params_.max_tools = 62;
+            params_.min_intervals_per_tool = 105;
+            params_.max_intervals_per_tool = 160;
             params_.min_gap = 35;
             params_.max_gap = 150;
             params_.min_interval = 200;
@@ -136,9 +136,9 @@ public:
             params_.max_ops_per_work = 44;
             params_.edge_prob = 0.060;
             params_.stoppable_prob = 0.82;
-            params_.extra_tool_prob = 0.30;
-            params_.tight_deadline_share = 0.26;
-            params_.medium_deadline_share = 0.45;
+            params_.extra_tool_prob = 0.22;
+            params_.tight_deadline_share = 0.32;
+            params_.medium_deadline_share = 0.43;
             return;
         }
 
