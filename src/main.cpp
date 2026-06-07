@@ -1,4 +1,5 @@
 #include <array>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <exception>
@@ -13,6 +14,8 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -255,6 +258,145 @@ void WriteTaskDataV1(const ProblemData& data, std::ostream& out) {
     out << "END\n";
 }
 
+void ExpectToken(std::istream& in, const std::string& expected) {
+    std::string actual;
+    if (!(in >> actual) || actual != expected) {
+        throw std::runtime_error("Expected token '" + expected + "'");
+    }
+}
+
+ProblemData ReadTaskDataV1(std::istream& in) {
+    ExpectToken(in, "TASK_DATA_V1");
+
+    ProblemData data;
+
+    ExpectToken(in, "TOOLS");
+    size_t tool_count = 0;
+    in >> tool_count;
+    if (!in) {
+        throw std::runtime_error("Invalid TOOLS section");
+    }
+    data.tools.reserve(tool_count);
+    for (size_t i = 0; i < tool_count; ++i) {
+        size_t tool_id = 0;
+        size_t interval_count = 0;
+        in >> tool_id >> interval_count;
+        if (!in || tool_id != i) {
+            throw std::runtime_error("Invalid tool row");
+        }
+        std::set<Tool::TimeInterval> schedule;
+        for (size_t j = 0; j < interval_count; ++j) {
+            uint64_t start = 0;
+            uint64_t end = 0;
+            in >> start >> end;
+            if (!in || end < start) {
+                throw std::runtime_error("Invalid tool interval");
+            }
+            schedule.insert(Tool::TimeInterval(start, end));
+        }
+        data.tools.push_back(Tool(schedule));
+    }
+
+    ExpectToken(in, "OPERATIONS");
+    size_t operation_count = 0;
+    in >> operation_count;
+    if (!in) {
+        throw std::runtime_error("Invalid OPERATIONS section");
+    }
+    data.operations.reserve(operation_count);
+    for (size_t i = 0; i < operation_count; ++i) {
+        size_t op_id = 0;
+        int stoppable = 0;
+        size_t parent_count = 0;
+        in >> op_id >> stoppable >> parent_count;
+        if (!in || op_id != i) {
+            throw std::runtime_error("Invalid operation row");
+        }
+        std::set<size_t> parents;
+        for (size_t j = 0; j < parent_count; ++j) {
+            size_t parent_id = 0;
+            in >> parent_id;
+            if (!in || parent_id >= operation_count) {
+                throw std::runtime_error("Invalid operation parent id");
+            }
+            parents.insert(parent_id);
+        }
+        size_t possible_tool_count = 0;
+        in >> possible_tool_count;
+        if (!in || possible_tool_count == 0) {
+            throw std::runtime_error("Invalid operation tool count");
+        }
+        std::set<size_t> possible_tools;
+        for (size_t j = 0; j < possible_tool_count; ++j) {
+            size_t tool_id = 0;
+            in >> tool_id;
+            if (!in || tool_id >= tool_count) {
+                throw std::runtime_error("Invalid operation tool id");
+            }
+            possible_tools.insert(tool_id);
+        }
+        data.operations.push_back(
+            Operation(stoppable != 0, parents, possible_tools));
+    }
+
+    ExpectToken(in, "TIMES");
+    size_t time_rows = 0;
+    size_t time_cols = 0;
+    in >> time_rows >> time_cols;
+    if (!in || time_rows != operation_count || time_cols != tool_count) {
+        throw std::runtime_error("Invalid TIMES dimensions");
+    }
+    data.times_matrix.assign(time_rows, std::vector<uint64_t>(time_cols, 0));
+    for (size_t row = 0; row < time_rows; ++row) {
+        for (size_t col = 0; col < time_cols; ++col) {
+            in >> data.times_matrix[row][col];
+            if (!in) {
+                throw std::runtime_error("Invalid TIMES value");
+            }
+        }
+    }
+
+    ExpectToken(in, "WORKS");
+    size_t work_count = 0;
+    in >> work_count;
+    if (!in) {
+        throw std::runtime_error("Invalid WORKS section");
+    }
+    data.works.reserve(work_count);
+    for (size_t i = 0; i < work_count; ++i) {
+        size_t work_id = 0;
+        uint64_t start_time = 0;
+        uint64_t directive = 0;
+        double fine = 0.0;
+        size_t op_count = 0;
+        in >> work_id >> start_time >> directive >> fine >> op_count;
+        if (!in || work_id != i || op_count == 0) {
+            throw std::runtime_error("Invalid work row");
+        }
+        std::set<size_t> operation_ids;
+        for (size_t j = 0; j < op_count; ++j) {
+            size_t op_id = 0;
+            in >> op_id;
+            if (!in || op_id >= operation_count) {
+                throw std::runtime_error("Invalid work operation id");
+            }
+            operation_ids.insert(op_id);
+        }
+        data.works.push_back(Work(start_time, directive, fine, operation_ids));
+    }
+
+    ExpectToken(in, "END");
+    return data;
+}
+
+ProblemData ReadTaskDataV1File(const std::filesystem::path& task_file) {
+    std::ifstream in(task_file);
+    if (!in.is_open()) {
+        throw std::runtime_error("Cannot open task file: " + task_file.string());
+    }
+    return ReadTaskDataV1(in);
+}
+
 std::string TaskProfileCsvHeader() {
     return "task_id,seed,n_tools,n_operations,n_works,stoppable_ratio,"
            "matrix_density,mean_time,max_time,time_cv,time_range_ratio,"
@@ -463,14 +605,198 @@ std::vector<RunResult> RunMethodsForTask(
 
     return results;
 }
+
+std::vector<std::filesystem::path> CollectTaskFiles(
+    const std::filesystem::path& task_file,
+    const std::filesystem::path& tasks_dir,
+    size_t max_task_count) {
+    std::vector<std::filesystem::path> files;
+    if (!task_file.empty()) {
+        files.push_back(task_file);
+        return files;
+    }
+
+    if (tasks_dir.empty()) {
+        return files;
+    }
+
+    if (!std::filesystem::exists(tasks_dir) ||
+        !std::filesystem::is_directory(tasks_dir)) {
+        throw std::runtime_error("Tasks directory does not exist: " +
+                                 tasks_dir.string());
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(tasks_dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        if (entry.path().extension() == ".task") {
+            files.push_back(entry.path());
+        }
+    }
+    std::sort(files.begin(), files.end());
+    if (max_task_count > 0 && files.size() > max_task_count) {
+        files.resize(max_task_count);
+    }
+    return files;
+}
+
+void WriteExperimentConfig(const std::string& config_path,
+                           size_t task_count,
+                           const std::string& source,
+                           const std::string& source_path,
+                           const std::string& difficulty,
+                           uint64_t base_seed,
+                           const LLMSelector::Config& llm_cfg,
+                           size_t method_threads,
+                           const std::string& long_results,
+                           const std::string& wide_results,
+                           const std::vector<MethodSpec>& methods) {
+    std::ofstream yaml(config_path);
+    if (!yaml.is_open()) {
+        return;
+    }
+    yaml << "experiment:\n";
+    yaml << "  task_count: " << task_count << "\n";
+    yaml << "  source: " << source << "\n";
+    if (!source_path.empty()) {
+        yaml << "  source_path: " << source_path << "\n";
+    }
+    if (!difficulty.empty()) {
+        yaml << "  difficulty: " << difficulty << "\n";
+    }
+    yaml << "  base_seed: " << base_seed << "\n";
+    yaml << "  llm_mode: " << llm_cfg.mode << "\n";
+    yaml << "  llm_model: " << llm_cfg.model << "\n";
+    yaml << "  llm_timeout_ms: " << llm_cfg.timeout_ms << "\n";
+    yaml << "  llm_endpoint: " << llm_cfg.endpoint << "\n";
+    yaml << "  method_threads: " << method_threads << "\n";
+    yaml << "  long_results: " << long_results << "\n";
+    yaml << "  wide_results: " << wide_results << "\n";
+    yaml << "  methods:\n";
+    for (const auto& m : methods) {
+        yaml << "    - " << m.name << "\n";
+    }
+}
+
+int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
+                 const std::vector<MethodSpec>& methods,
+                 const LLMSelector::Config& llm_cfg,
+                 uint64_t base_seed,
+                 size_t method_threads,
+                 MethodThreadPool* method_pool,
+                 const std::string& long_csv_path,
+                 const std::string& wide_csv_path,
+                 const std::string& config_path,
+                 const std::string& source,
+                 const std::string& source_path) {
+    if (task_files.empty()) {
+        std::cerr << "No .task files found for dataset run\n";
+        return 1;
+    }
+
+    std::map<std::string, Metric> metrics;
+    std::ofstream csv_long(long_csv_path);
+    if (!csv_long.is_open()) {
+        std::cerr << "Cannot open output file: " << long_csv_path << std::endl;
+        return 1;
+    }
+    csv_long << "task_id,seed,task_source,method,valid,score,runtime_ms,"
+             << "selected_heuristic,llm_latency_ms,llm_used_fallback,"
+             << "llm_raw_response\n";
+
+    std::ofstream csv_wide(wide_csv_path);
+    if (!csv_wide.is_open()) {
+        std::cerr << "Cannot open output file: " << wide_csv_path << std::endl;
+        return 1;
+    }
+    csv_wide << "task_id,seed,task_source";
+    for (const auto& m : methods) {
+        csv_wide << "," << m.name << "_valid"
+                 << "," << m.name << "_score"
+                 << "," << m.name << "_runtime_ms"
+                 << "," << m.name << "_selected_heuristic"
+                 << "," << m.name << "_llm_latency_ms"
+                 << "," << m.name << "_llm_used_fallback";
+    }
+    csv_wide << "\n";
+
+    WriteExperimentConfig(config_path, task_files.size(), source, source_path,
+                          "", base_seed, llm_cfg, method_threads,
+                          long_csv_path, wide_csv_path, methods);
+
+    for (size_t task_id = 0; task_id < task_files.size(); ++task_id) {
+        const uint64_t seed = base_seed + task_id * 7919;
+        const auto& path = task_files[task_id];
+        ProblemData source_data = ReadTaskDataV1File(path);
+
+        const auto task_results =
+            RunMethodsForTask(source_data, methods, llm_cfg, seed,
+                              method_threads, method_pool);
+
+        const std::string task_source = path.string();
+        for (size_t i = 0; i < methods.size(); ++i) {
+            const auto& method = methods[i];
+            const RunResult& result = task_results[i];
+
+            if (result.valid) {
+                metrics[method.name].success++;
+                metrics[method.name].min_score =
+                    std::min(metrics[method.name].min_score, result.score);
+                metrics[method.name].max_score =
+                    std::max(metrics[method.name].max_score, result.score);
+            } else {
+                metrics[method.name].fail++;
+            }
+
+            csv_long << task_id << "," << seed << ","
+                     << CsvQuote(task_source) << "," << method.name << ","
+                     << (result.valid ? 1 : 0) << "," << result.score << ","
+                     << result.runtime_ms << "," << result.selected_heuristic
+                     << "," << result.llm_latency_ms << ","
+                     << result.llm_used_fallback << ","
+                     << CsvQuote(result.llm_raw_response) << "\n";
+        }
+
+        csv_wide << task_id << "," << seed << "," << CsvQuote(task_source);
+        for (size_t i = 0; i < methods.size(); ++i) {
+            const RunResult& r = task_results[i];
+            csv_wide << "," << (r.valid ? 1 : 0) << "," << r.score << ","
+                     << r.runtime_ms << "," << r.selected_heuristic << ","
+                     << r.llm_latency_ms << "," << r.llm_used_fallback;
+        }
+        csv_wide << "\n";
+    }
+
+    std::cout << "Loaded task files: " << task_files.size() << "\n";
+    std::cout << "Saved long baseline results to: " << long_csv_path << "\n";
+    std::cout << "Saved wide baseline results to: " << wide_csv_path << "\n";
+    std::cout << "Saved experiment config to: " << config_path << "\n";
+
+    for (const auto& m : methods) {
+        const Metric& mm = metrics[m.name];
+        std::cout << "[" << m.name << "] success=" << mm.success
+                  << " fail=" << mm.fail;
+        if (mm.success > 0) {
+            std::cout << " min_score=" << mm.min_score
+                      << " max_score=" << mm.max_score;
+        }
+        std::cout << "\n";
+    }
+
+    return 0;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     size_t task_count = 1000;
     size_t method_threads = 1;
     bool generate_only = false;
+    bool task_count_explicit = false;
     uint64_t base_seed = 0;
     std::filesystem::path out_dir = "generated_tasks";
+    std::filesystem::path task_file;
+    std::filesystem::path tasks_dir;
     GeneratorDataV2::DifficultyPreset difficulty =
         GeneratorDataV2::DifficultyPreset::SmallEasy;
 
@@ -483,10 +809,15 @@ int main(int argc, char** argv) {
             generate_only = true;
         } else if (a.rfind("--tasks=", 0) == 0) {
             task_count = static_cast<size_t>(std::stoull(a.substr(8)));
+            task_count_explicit = true;
         } else if (a.rfind("--base-seed=", 0) == 0) {
             base_seed = static_cast<uint64_t>(std::stoull(a.substr(12)));
         } else if (a.rfind("--out-dir=", 0) == 0) {
             out_dir = a.substr(10);
+        } else if (a.rfind("--task-file=", 0) == 0) {
+            task_file = a.substr(12);
+        } else if (a.rfind("--tasks-dir=", 0) == 0) {
+            tasks_dir = a.substr(12);
         } else if (a.rfind("--difficulty=", 0) == 0) {
             const std::string d = a.substr(13);
             if (d == "small_easy") {
@@ -544,6 +875,26 @@ int main(int argc, char** argv) {
     std::unique_ptr<MethodThreadPool> method_pool;
     if (method_threads > 1) {
         method_pool = std::make_unique<MethodThreadPool>(method_threads);
+    }
+
+    if (!task_file.empty() || !tasks_dir.empty()) {
+        try {
+            const size_t max_files =
+                (!tasks_dir.empty() && task_count_explicit) ? task_count : 0;
+            const auto task_files =
+                CollectTaskFiles(task_file, tasks_dir, max_files);
+            const std::string source = !task_file.empty() ? "task_file"
+                                                          : "tasks_dir";
+            const std::string source_path =
+                (!task_file.empty() ? task_file : tasks_dir).string();
+            return RunTaskFiles(task_files, methods, llm_cfg, base_seed,
+                                method_threads, method_pool.get(),
+                                kLongCsvPath, kWideCsvPath, kConfigPath,
+                                source, source_path);
+        } catch (const std::exception& e) {
+            std::cerr << "Dataset run failed: " << e.what() << "\n";
+            return 1;
+        }
     }
 
     GeneratorDataV2 generator(difficulty);
