@@ -122,6 +122,37 @@ public:
         return d;
     }
 
+    static std::string SystemPrompt() {
+        return "You choose one front-sorting heuristic for a production scheduling "
+               "solver. Available heuristics: "
+               "DUMMY keeps the original front order; it can be strong when the "
+               "task is easy, sparse, or has enough slack. "
+               "DIRECTIVE prioritizes works with earlier deadlines; it is often "
+               "strong when deadlines are tight or slack is small. "
+               "FINE prioritizes works with larger lateness penalty; use it when "
+               "penalty coefficients are highly uneven, not merely because fines "
+               "exist. "
+               "ROUND_ROBIN rotates priority between works; use it when many works "
+               "compete and the graph/resource structure is dense. "
+               "DEPENDENT prioritizes operations that unlock many immediate child "
+               "operations in the dependency graph. "
+               "SPT prioritizes shorter operations by minimum processing time. "
+               "LPT prioritizes longer operations by minimum processing time. "
+               "LEAST_FLEXIBLE prioritizes operations with fewer possible tools. "
+               "SLACK_BASED prioritizes works with the smallest remaining time "
+               "reserve: deadline minus estimated remaining work. "
+               "Before answering, internally score each heuristic from 0 to 3 for "
+               "expected final score on this task: 3 means likely best, 0 means "
+               "likely worst. Consider slack, matrix density, in/out-degree, "
+               "processing-time spread, resource load, fine spread, operation "
+               "count, and work count. Choose the heuristic with "
+               "the highest internal score. Break ties by expected lower final "
+               "penalty, not by name order. Return exactly one token from: DUMMY, "
+               "DIRECTIVE, FINE, ROUND_ROBIN, DEPENDENT, SPT, LPT, "
+               "LEAST_FLEXIBLE, SLACK_BASED. Do not output the scores. No "
+               "explanations.";
+    }
+
 private:
     static std::string ToLower(const std::string& s) {
         std::string out = s;
@@ -289,34 +320,7 @@ private:
         const std::filesystem::path resp =
             tmp_dir / ("llm_resp_" + suffix + ".json");
 
-        const std::string system_prompt =
-            "You choose one front-sorting heuristic for a production scheduling "
-            "solver. Available heuristics: "
-            "DUMMY keeps the original front order; it can be strong when the "
-            "task is easy, sparse, or has enough slack. "
-            "DIRECTIVE prioritizes works with earlier deadlines; it is often "
-            "strong when deadlines are tight or slack is small. "
-            "FINE prioritizes works with larger lateness penalty; use it when "
-            "penalty coefficients are highly uneven, not merely because fines "
-            "exist. "
-            "ROUND_ROBIN rotates priority between works; use it when many works "
-            "compete and the graph/resource structure is dense. "
-            "DEPENDENT prioritizes operations that unlock many immediate child "
-            "operations in the dependency graph. "
-            "SPT prioritizes shorter operations by minimum processing time. "
-            "LPT prioritizes longer operations by minimum processing time. "
-            "LEAST_FLEXIBLE prioritizes operations with fewer possible tools. "
-            "SLACK_BASED prioritizes works with the smallest remaining time "
-            "reserve: deadline minus estimated remaining work. "
-            "Before answering, internally score each heuristic from 0 to 3 for "
-            "expected final score on this task: 3 means likely best, 0 means "
-            "likely worst. Consider slack, matrix density, graph edges, fine "
-            "spread, operation count, and work count. Choose the heuristic with "
-            "the highest internal score. Break ties by expected lower final "
-            "penalty, not by name order. Return exactly one token from: DUMMY, "
-            "DIRECTIVE, FINE, ROUND_ROBIN, DEPENDENT, SPT, LPT, "
-            "LEAST_FLEXIBLE, SLACK_BASED. Do not output the scores. No "
-            "explanations.";
+        const std::string system_prompt = SystemPrompt();
 
         std::ofstream out(req);
         if (!out.is_open()) {

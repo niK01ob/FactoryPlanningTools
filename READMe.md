@@ -17,7 +17,9 @@ C++ проект для экспериментов по производстве
 - `slack_based` (операции работ с наименьшим оценочным запасом времени)
 - Проверка корректности решения: `SolutionChecker`.
 - Подсчёт штрафа: `Scorer`.
-- Новый генератор задач: `GeneratorDataV2` с preset-сложностью `easy|medium|hard`.
+- Новый генератор задач: `GeneratorDataV2` с preset-сложностью:
+- быстрые smoke-пресеты: `small_easy|small_medium|small_hard`;
+- крупные экспериментальные пресеты: `easy|medium|hard`.
 - Batch-runner в `main` с выгрузкой:
 - `baseline_results_long.csv`
 - `baseline_results_wide.csv`
@@ -56,14 +58,46 @@ cmake --build build-gcc --target FactoryPlanningTools.tests -j 4
 ### Baselines без LLM
 
 ```bash
+./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=small_medium
+```
+
+Для крупных дипломных экспериментов используйте новые большие preset-ы:
+
+```bash
 ./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=medium
 ```
 
 ### С LLM mock
 
 ```bash
-./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=medium --llm=mock
+./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=small_medium --llm=mock
 ```
+
+### Только генерация корпуса задач
+
+Этот режим не запускает solver и LLM. Он нужен, чтобы зафиксировать один набор
+задач для честного сравнения разных режимов: `no llm`, base LLM,
+fine-tuned LLM, а также для подготовки prompt-датасета.
+
+```bash
+./build-gcc/FactoryPlanningTools.exe \
+  --generate-only \
+  --tasks=10000 \
+  --difficulty=medium \
+  --base-seed=123456 \
+  --out-dir=generated_medium_10k
+```
+
+Выходная структура:
+- `tasks/*.task` — задачи в текстовом формате `TASK_DATA_V1`.
+- `profiles/*.txt` — `TASK_PROFILE_V1` для каждой задачи.
+- `prompts/*.json` — OpenAI-style messages для каждой задачи.
+- `prompts.jsonl` — все prompt-ы в JSONL, удобно для дальнейшей разметки.
+- `task_profiles.csv` — табличные признаки задач.
+- `dataset_config.yaml` — параметры генерации и seed.
+
+Важно: `--base-seed` фиксирует корпус. При одинаковых `--tasks`,
+`--difficulty` и `--base-seed` генератор создаёт тот же набор задач.
 
 ### С real LLM
 
@@ -73,8 +107,9 @@ export LLM_SELECTOR_MODE=real
 export LLM_API_KEY=<your_key>
 export LLM_MODEL=gpt-4o-mini
 export LLM_TIMEOUT_MS=20000
+export LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
 
-./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=medium --llm=real
+./build-gcc/FactoryPlanningTools.exe --tasks=200 --difficulty=small_medium --llm=real
 ```
 
 ```powershell
@@ -83,9 +118,66 @@ $env:LLM_SELECTOR_MODE="real"
 $env:LLM_API_KEY="<your_key>"
 $env:LLM_MODEL="gpt-4o-mini"
 $env:LLM_TIMEOUT_MS="20000"
+$env:LLM_ENDPOINT="https://api.openai.com/v1/chat/completions"
 
-.\build-gcc\FactoryPlanningTools.exe --tasks=200 --difficulty=medium --llm=real
+.\build-gcc\FactoryPlanningTools.exe --tasks=200 --difficulty=small_medium --llm=real
 ```
+
+### С real LLM через SSH-туннель
+
+`LLMSelector` отправляет запрос в OpenAI-compatible Chat Completions API:
+
+- метод: `POST`
+- endpoint: `LLM_ENDPOINT`
+- формат: `/v1/chat/completions`
+- обязательный заголовок: `Authorization: Bearer <LLM_API_KEY>`
+- ожидаемый ответ: `choices[0].message.content` с одним токеном эвристики, например `DIRECTIVE`
+
+Если LLM запущена на удаленной машине, а локально открыт SSH-туннель, указывайте локальный адрес туннеля. Например, если туннель пробрасывает удаленный порт `8000` на локальный `8000`:
+
+```powershell
+$env:LLM_SELECTOR_MODE="real"
+$env:LLM_ENDPOINT="http://127.0.0.1:8000/v1/chat/completions"
+$env:LLM_MODEL="<served-model-name>"
+$env:LLM_TIMEOUT_MS="30000"
+
+# Если сервер не проверяет авторизацию, все равно задайте любое непустое значение:
+$env:LLM_API_KEY="local"
+
+# Если сервер требует токен, задайте реальный токен вместо local:
+# $env:LLM_API_KEY="<server-token>"
+
+.\build-gcc\FactoryPlanningTools.exe --tasks=5 --difficulty=small_easy --llm=real --method-threads=9
+```
+
+Аналогично для Linux/macOS:
+
+```bash
+export LLM_SELECTOR_MODE=real
+export LLM_ENDPOINT=http://127.0.0.1:8000/v1/chat/completions
+export LLM_MODEL=<served-model-name>
+export LLM_TIMEOUT_MS=30000
+export LLM_API_KEY=local
+
+./build-gcc/FactoryPlanningTools.exe --tasks=5 --difficulty=small_easy --llm=real --method-threads=9
+```
+
+Важно: `LLM_API_KEY` сейчас должен быть непустым даже для локального туннеля. Иначе real-режим не делает HTTP-запрос и пишет в CSV `REAL_MODE_NO_API_KEY`.
+
+Проверенный пример для Ollama/OpenAI-compatible endpoint на локальном порту `11434`:
+
+```powershell
+$env:PATH="$env:USERPROFILE\scoop\apps\gcc\current\bin;$env:PATH"
+$env:LLM_SELECTOR_MODE="real"
+$env:LLM_API_KEY="ollama"
+$env:LLM_MODEL="qwen2.5:3b"
+$env:LLM_TIMEOUT_MS="60000"
+$env:LLM_ENDPOINT="http://127.0.0.1:11434/v1/chat/completions"
+
+.\FactoryPlanningTools.exe --tasks=30 --difficulty=small_medium --llm=real
+```
+
+Для этого прогона ожидаемый признак успешной работы real-режима: в `baseline_results_long.csv` у строк `method=llm` поле `llm_used_fallback` равно `0`.
 
 ## Артефакты прогона
 
@@ -122,10 +214,12 @@ python scripts/summarize_results.py \
 1. Выберите модель и endpoint.
 - По умолчанию endpoint: `https://api.openai.com/v1/chat/completions`.
 - Модель задаётся через `LLM_MODEL`.
+- Для SSH-туннеля обычно нужен endpoint вида `http://127.0.0.1:<local_port>/v1/chat/completions`.
+- Сервер должен быть совместим с OpenAI Chat Completions API.
 
 2. Установите переменные окружения.
 - `LLM_SELECTOR_MODE=real`
-- `LLM_API_KEY=<ключ>`
+- `LLM_API_KEY=<ключ>`; для локального сервера без авторизации можно указать любое непустое значение, например `local`.
 - `LLM_MODEL=<имя модели>`
 - `LLM_TIMEOUT_MS=<таймаут_мс>`
 - опционально `LLM_ENDPOINT=<url>`
@@ -148,6 +242,7 @@ Fallback включён всегда для отказоустойчивости
 - при ошибке вызова API,
 - при пустом ответе,
 
-selector автоматически выбирает `DIRECTIVE` и это явно отражается в логах:
+В текущей реализации fallback-эвристика по умолчанию — `DIRECTIVE`
+(`LLMSelector::Config::fallback`). Это явно отражается в логах:
 - `llm_used_fallback=1`
 - `llm_raw_response=<текст ошибки/ответа>`

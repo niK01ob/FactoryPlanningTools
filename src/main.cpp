@@ -2,9 +2,11 @@
 #include <chrono>
 #include <condition_variable>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -48,6 +50,12 @@ const char* ToName(Solver::HeuristicType h) {
 
 const char* DifficultyToName(GeneratorDataV2::DifficultyPreset d) {
     switch (d) {
+        case GeneratorDataV2::DifficultyPreset::SmallEasy:
+            return "small_easy";
+        case GeneratorDataV2::DifficultyPreset::SmallMedium:
+            return "small_medium";
+        case GeneratorDataV2::DifficultyPreset::SmallHard:
+            return "small_hard";
         case GeneratorDataV2::DifficultyPreset::Easy:
             return "easy";
         case GeneratorDataV2::DifficultyPreset::Medium:
@@ -160,6 +168,228 @@ std::string CsvQuote(const std::string& value) {
     return out;
 }
 
+std::string JsonQuote(const std::string& value) {
+    std::string out = "\"";
+    for (char c : value) {
+        switch (c) {
+            case '\\':
+                out += "\\\\";
+                break;
+            case '"':
+                out += "\\\"";
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                out += "\\r";
+                break;
+            case '\t':
+                out += "\\t";
+                break;
+            default:
+                out.push_back(c);
+                break;
+        }
+    }
+    out += "\"";
+    return out;
+}
+
+std::string FormatTaskId(size_t task_id) {
+    std::ostringstream out;
+    out << "task_" << std::setw(6) << std::setfill('0') << task_id;
+    return out.str();
+}
+
+void WriteTaskDataV1(const ProblemData& data, std::ostream& out) {
+    out << "TASK_DATA_V1\n";
+    out << "TOOLS " << data.tools.size() << "\n";
+    for (size_t tool_id = 0; tool_id < data.tools.size(); ++tool_id) {
+        const auto& schedule = data.tools[tool_id].GetSchedule();
+        out << tool_id << " " << schedule.size();
+        for (const auto& interval : schedule) {
+            out << " " << interval.start << " " << interval.end;
+        }
+        out << "\n";
+    }
+
+    out << "OPERATIONS " << data.operations.size() << "\n";
+    for (size_t op_id = 0; op_id < data.operations.size(); ++op_id) {
+        const auto& op = data.operations[op_id];
+        out << op_id << " " << (op.stoppable ? 1 : 0) << " "
+            << op.previous_op_id.size();
+        for (size_t parent_id : op.previous_op_id) {
+            out << " " << parent_id;
+        }
+        out << " " << op.possible_tools.size();
+        for (size_t tool_id : op.possible_tools) {
+            out << " " << tool_id;
+        }
+        out << "\n";
+    }
+
+    out << "TIMES " << data.times_matrix.size() << " "
+        << (data.times_matrix.empty() ? 0 : data.times_matrix.front().size())
+        << "\n";
+    for (const auto& row : data.times_matrix) {
+        for (size_t tool_id = 0; tool_id < row.size(); ++tool_id) {
+            if (tool_id > 0) {
+                out << " ";
+            }
+            out << row[tool_id];
+        }
+        out << "\n";
+    }
+
+    out << "WORKS " << data.works.size() << "\n";
+    for (size_t work_id = 0; work_id < data.works.size(); ++work_id) {
+        const auto& work = data.works[work_id];
+        out << work_id << " " << work.start_time << " " << work.directive
+            << " " << work.fine_coef << " " << work.operation_ids.size();
+        for (size_t op_id : work.operation_ids) {
+            out << " " << op_id;
+        }
+        out << "\n";
+    }
+    out << "END\n";
+}
+
+std::string TaskProfileCsvHeader() {
+    return "task_id,seed,n_tools,n_operations,n_works,stoppable_ratio,"
+           "matrix_density,mean_time,max_time,time_cv,time_range_ratio,"
+           "avg_tools_per_operation,min_tools_per_operation,"
+           "single_tool_operation_ratio,resource_load_ratio,n_edges,"
+           "graph_density,avg_in_degree,max_in_degree,avg_out_degree,"
+           "max_out_degree,avg_ops_per_work,max_ops_per_work,ops_per_work_std,"
+           "mean_slack,min_slack,max_slack,std_slack,tight_work_ratio,"
+           "min_fine,mean_fine,max_fine,std_fine,fine_cv,fine_range_ratio\n";
+}
+
+void WriteTaskProfileCsvRow(size_t task_id, uint64_t seed, const TaskProfile& p,
+                            std::ostream& out) {
+    out << task_id << "," << seed << "," << p.n_tools << ","
+        << p.n_operations << "," << p.n_works << "," << p.stoppable_ratio
+        << "," << p.matrix_density << "," << p.mean_time << ","
+        << p.max_time << "," << p.time_cv << "," << p.time_range_ratio
+        << "," << p.avg_tools_per_operation << ","
+        << p.min_tools_per_operation << "," << p.single_tool_operation_ratio
+        << "," << p.resource_load_ratio << "," << p.n_edges << ","
+        << p.graph_density << "," << p.avg_in_degree << ","
+        << p.max_in_degree << "," << p.avg_out_degree << ","
+        << p.max_out_degree << "," << p.avg_ops_per_work << ","
+        << p.max_ops_per_work << "," << p.ops_per_work_std << ","
+        << p.mean_slack << "," << p.min_slack << "," << p.max_slack << ","
+        << p.std_slack << "," << p.tight_work_ratio << "," << p.min_fine
+        << "," << p.mean_fine << "," << p.max_fine << "," << p.std_fine
+        << "," << p.fine_cv << "," << p.fine_range_ratio << "\n";
+}
+
+int GenerateTaskDataset(size_t task_count,
+                        GeneratorDataV2::DifficultyPreset difficulty,
+                        uint64_t base_seed,
+                        const std::filesystem::path& out_dir) {
+    std::filesystem::create_directories(out_dir / "tasks");
+    std::filesystem::create_directories(out_dir / "profiles");
+    std::filesystem::create_directories(out_dir / "prompts");
+
+    std::ofstream profiles_csv(out_dir / "task_profiles.csv");
+    if (!profiles_csv.is_open()) {
+        std::cerr << "Cannot open task_profiles.csv in " << out_dir << "\n";
+        return 1;
+    }
+    profiles_csv << TaskProfileCsvHeader();
+
+    std::ofstream prompts_jsonl(out_dir / "prompts.jsonl");
+    if (!prompts_jsonl.is_open()) {
+        std::cerr << "Cannot open prompts.jsonl in " << out_dir << "\n";
+        return 1;
+    }
+
+    std::ofstream manifest(out_dir / "dataset_config.yaml");
+    if (!manifest.is_open()) {
+        std::cerr << "Cannot open dataset_config.yaml in " << out_dir << "\n";
+        return 1;
+    }
+
+    manifest << "dataset:\n";
+    manifest << "  format: TASK_DATA_V1\n";
+    manifest << "  task_count: " << task_count << "\n";
+    manifest << "  difficulty: " << DifficultyToName(difficulty) << "\n";
+    manifest << "  base_seed: " << base_seed << "\n";
+    manifest << "  tasks_dir: tasks\n";
+    manifest << "  profiles_dir: profiles\n";
+    manifest << "  prompts_dir: prompts\n";
+    manifest << "  profiles_csv: task_profiles.csv\n";
+    manifest << "  prompts_jsonl: prompts.jsonl\n";
+
+    GeneratorDataV2 generator(difficulty);
+    const std::string system_prompt = LLMSelector::SystemPrompt();
+
+    for (size_t task_id = 0; task_id < task_count; ++task_id) {
+        const uint64_t seed = base_seed + task_id * 7919;
+        generator.Generate(seed);
+        const ProblemData source_data((*generator.GetData()));
+
+        const TaskProfile profile = TaskProfileBuilder::Build(&source_data);
+        const std::string profile_text =
+            TaskProfileBuilder::ToTaskProfileV1Text(profile);
+        const std::string task_stem = FormatTaskId(task_id);
+
+        std::ofstream task_file(out_dir / "tasks" / (task_stem + ".task"));
+        if (!task_file.is_open()) {
+            std::cerr << "Cannot write task file for task_id=" << task_id << "\n";
+            return 1;
+        }
+        WriteTaskDataV1(source_data, task_file);
+
+        std::ofstream profile_file(out_dir / "profiles" / (task_stem + ".txt"));
+        if (!profile_file.is_open()) {
+            std::cerr << "Cannot write profile file for task_id=" << task_id
+                      << "\n";
+            return 1;
+        }
+        profile_file << profile_text;
+
+        std::ofstream prompt_file(out_dir / "prompts" / (task_stem + ".json"));
+        if (!prompt_file.is_open()) {
+            std::cerr << "Cannot write prompt file for task_id=" << task_id
+                      << "\n";
+            return 1;
+        }
+        prompt_file << "{\n"
+                    << "  \"task_id\": " << task_id << ",\n"
+                    << "  \"seed\": " << seed << ",\n"
+                    << "  \"messages\": [\n"
+                    << "    {\"role\": \"system\", \"content\": "
+                    << JsonQuote(system_prompt) << "},\n"
+                    << "    {\"role\": \"user\", \"content\": "
+                    << JsonQuote(profile_text) << "}\n"
+                    << "  ]\n"
+                    << "}\n";
+
+        prompts_jsonl << "{\"task_id\":" << task_id << ",\"seed\":" << seed
+                      << ",\"messages\":[{\"role\":\"system\",\"content\":"
+                      << JsonQuote(system_prompt)
+                      << "},{\"role\":\"user\",\"content\":"
+                      << JsonQuote(profile_text) << "}]}\n";
+
+        WriteTaskProfileCsvRow(task_id, seed, profile, profiles_csv);
+    }
+
+    std::cout << "Generated task dataset in: " << out_dir << "\n";
+    std::cout << "Saved tasks to: " << (out_dir / "tasks") << "\n";
+    std::cout << "Saved profiles to: " << (out_dir / "profiles") << "\n";
+    std::cout << "Saved prompts to: " << (out_dir / "prompts") << "\n";
+    std::cout << "Saved prompts JSONL to: " << (out_dir / "prompts.jsonl")
+              << "\n";
+    std::cout << "Saved profile CSV to: " << (out_dir / "task_profiles.csv")
+              << "\n";
+    std::cout << "Saved dataset config to: " << (out_dir / "dataset_config.yaml")
+              << "\n";
+    return 0;
+}
+
 RunResult RunMethod(const ProblemData& source_data, const MethodSpec& method,
                     const LLMSelector::Config& llm_cfg, uint64_t seed) {
     RunResult result;
@@ -238,19 +468,34 @@ std::vector<RunResult> RunMethodsForTask(
 int main(int argc, char** argv) {
     size_t task_count = 1000;
     size_t method_threads = 1;
+    bool generate_only = false;
+    uint64_t base_seed = 0;
+    std::filesystem::path out_dir = "generated_tasks";
     GeneratorDataV2::DifficultyPreset difficulty =
-        GeneratorDataV2::DifficultyPreset::Easy;
+        GeneratorDataV2::DifficultyPreset::SmallEasy;
 
     LLMSelector::Config llm_cfg = LLMSelector::ConfigFromEnv();
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a.rfind("--llm=", 0) == 0) {
             llm_cfg.mode = a.substr(6);
+        } else if (a == "--generate-only") {
+            generate_only = true;
         } else if (a.rfind("--tasks=", 0) == 0) {
             task_count = static_cast<size_t>(std::stoull(a.substr(8)));
+        } else if (a.rfind("--base-seed=", 0) == 0) {
+            base_seed = static_cast<uint64_t>(std::stoull(a.substr(12)));
+        } else if (a.rfind("--out-dir=", 0) == 0) {
+            out_dir = a.substr(10);
         } else if (a.rfind("--difficulty=", 0) == 0) {
             const std::string d = a.substr(13);
-            if (d == "easy") {
+            if (d == "small_easy") {
+                difficulty = GeneratorDataV2::DifficultyPreset::SmallEasy;
+            } else if (d == "small_medium") {
+                difficulty = GeneratorDataV2::DifficultyPreset::SmallMedium;
+            } else if (d == "small_hard") {
+                difficulty = GeneratorDataV2::DifficultyPreset::SmallHard;
+            } else if (d == "easy") {
                 difficulty = GeneratorDataV2::DifficultyPreset::Easy;
             } else if (d == "medium") {
                 difficulty = GeneratorDataV2::DifficultyPreset::Medium;
@@ -263,6 +508,15 @@ int main(int argc, char** argv) {
                 method_threads = 1;
             }
         }
+    }
+
+    if (base_seed == 0) {
+        base_seed = static_cast<uint64_t>(
+            std::chrono::system_clock::now().time_since_epoch().count());
+    }
+
+    if (generate_only) {
+        return GenerateTaskDataset(task_count, difficulty, base_seed, out_dir);
     }
 
     const std::string kLongCsvPath = "baseline_results_long.csv";
@@ -317,9 +571,6 @@ int main(int argc, char** argv) {
                  << "," << m.name << "_llm_used_fallback";
     }
     csv_wide << "\n";
-
-    const uint64_t base_seed = static_cast<uint64_t>(
-        std::chrono::system_clock::now().time_since_epoch().count());
 
     std::ofstream yaml(kConfigPath);
     if (yaml.is_open()) {

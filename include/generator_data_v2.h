@@ -10,7 +10,14 @@
 
 class GeneratorDataV2 {
 public:
-    enum class DifficultyPreset { Easy, Medium, Hard };
+    enum class DifficultyPreset {
+        SmallEasy,
+        SmallMedium,
+        SmallHard,
+        Easy,
+        Medium,
+        Hard
+    };
 
     struct Params {
         size_t min_tools = 6;
@@ -42,7 +49,7 @@ public:
 
     void ApplyPreset(DifficultyPreset preset) {
         params_ = Params();
-        if (preset == DifficultyPreset::Easy) {
+        if (preset == DifficultyPreset::SmallEasy) {
             params_.min_tools = 8;
             params_.max_tools = 16;
             params_.min_intervals_per_tool = 18;
@@ -59,7 +66,7 @@ public:
             return;
         }
 
-        if (preset == DifficultyPreset::Medium) {
+        if (preset == DifficultyPreset::SmallMedium) {
             params_.min_tools = 6;
             params_.max_tools = 14;
             params_.min_intervals_per_tool = 14;
@@ -76,19 +83,82 @@ public:
             return;
         }
 
+        if (preset == DifficultyPreset::SmallHard) {
+            params_.min_tools = 7;
+            params_.max_tools = 14;
+            params_.min_intervals_per_tool = 16;
+            params_.max_intervals_per_tool = 30;
+            params_.min_works = 4;
+            params_.max_works = 10;
+            params_.min_ops_per_work = 5;
+            params_.max_ops_per_work = 14;
+            params_.edge_prob = 0.155;
+            params_.stoppable_prob = 0.68;
+            params_.extra_tool_prob = 0.12;
+            params_.tight_deadline_share = 0.34;
+            params_.medium_deadline_share = 0.44;
+            return;
+        }
+
+        if (preset == DifficultyPreset::Easy) {
+            params_.min_tools = 32;
+            params_.max_tools = 45;
+            params_.min_intervals_per_tool = 75;
+            params_.max_intervals_per_tool = 115;
+            params_.min_gap = 40;
+            params_.max_gap = 160;
+            params_.min_interval = 180;
+            params_.max_interval = 620;
+            params_.min_works = 32;
+            params_.max_works = 52;
+            params_.min_ops_per_work = 16;
+            params_.max_ops_per_work = 30;
+            params_.edge_prob = 0.038;
+            params_.stoppable_prob = 0.90;
+            params_.extra_tool_prob = 0.30;
+            params_.tight_deadline_share = 0.14;
+            params_.medium_deadline_share = 0.52;
+            return;
+        }
+
+        if (preset == DifficultyPreset::Medium) {
+            params_.min_tools = 50;
+            params_.max_tools = 68;
+            params_.min_intervals_per_tool = 120;
+            params_.max_intervals_per_tool = 175;
+            params_.min_gap = 35;
+            params_.max_gap = 150;
+            params_.min_interval = 200;
+            params_.max_interval = 720;
+            params_.min_works = 58;
+            params_.max_works = 88;
+            params_.min_ops_per_work = 24;
+            params_.max_ops_per_work = 44;
+            params_.edge_prob = 0.060;
+            params_.stoppable_prob = 0.82;
+            params_.extra_tool_prob = 0.30;
+            params_.tight_deadline_share = 0.26;
+            params_.medium_deadline_share = 0.45;
+            return;
+        }
+
         // Hard
-        params_.min_tools = 5;
-        params_.max_tools = 10;
-        params_.min_intervals_per_tool = 9;
-        params_.max_intervals_per_tool = 20;
-        params_.min_works = 5;
-        params_.max_works = 14;
-        params_.min_ops_per_work = 8;
-        params_.max_ops_per_work = 20;
-        params_.edge_prob = 0.22;
-        params_.stoppable_prob = 0.55;
-        params_.extra_tool_prob = 0.20;
-        params_.tight_deadline_share = 0.45;
+        params_.min_tools = 70;
+        params_.max_tools = 95;
+        params_.min_intervals_per_tool = 165;
+        params_.max_intervals_per_tool = 240;
+        params_.min_gap = 30;
+        params_.max_gap = 140;
+        params_.min_interval = 200;
+        params_.max_interval = 720;
+        params_.min_works = 90;
+        params_.max_works = 130;
+        params_.min_ops_per_work = 30;
+        params_.max_ops_per_work = 54;
+        params_.edge_prob = 0.080;
+        params_.stoppable_prob = 0.68;
+        params_.extra_tool_prob = 0.18;
+        params_.tight_deadline_share = 0.34;
         params_.medium_deadline_share = 0.40;
     }
 

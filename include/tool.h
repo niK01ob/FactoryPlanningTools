@@ -111,7 +111,9 @@ public:
         operation.end_time = std::prev(work_process_.end())->end;
     }
 
-    void PrintShedule(std::ostream& out_stream) {
+    const std::set<TimeInterval>& GetSchedule() const { return shedule_; }
+
+    void PrintShedule(std::ostream& out_stream) const {
         for (auto inter : shedule_) {
             out_stream << "(" << inter.start << ", " << inter.end << ") ";
         }
@@ -140,6 +142,14 @@ public:
             if (gant.operation == id_op) {
                 total_time += gant.GetTimeSpan();
             }
+        }
+        return total_time;
+    }
+
+    uint64_t GetTotalAvailableTime() const {
+        uint64_t total_time = 0;
+        for (const auto& shed : shedule_) {
+            total_time += shed.GetTimeSpan();
         }
         return total_time;
     }

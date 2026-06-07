@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <string>
 
 #include "problem_data.h"
+#include "task_profile.h"
 #include "tool.h"
 #include "work.h"
 
@@ -115,6 +117,31 @@ TEST(Updated_parser, base_parsing) {
     EXPECT_TRUE(test_data.operations[2].previous_op_id.empty());
     EXPECT_TRUE((test_data.operations[3].previous_op_id == std::set<size_t>{4}));
     EXPECT_TRUE(test_data.operations[4].previous_op_id.empty());
+}
+
+TEST(TaskProfile__Test, reference_features_are_compactly_serialized) {
+    ProblemData data;
+    data.tools = kTools;
+    for (const auto& op : kOperations) {
+        data.operations.emplace_back(op.stoppable, op.previous_op_id,
+                                     op.possible_tools);
+    }
+    data.times_matrix = kTimesMatrix;
+
+    const TaskProfile profile = TaskProfileBuilder::Build(&data);
+
+    EXPECT_DOUBLE_EQ(profile.avg_out_degree, 0.75);
+    EXPECT_EQ(profile.max_out_degree, 3u);
+    EXPECT_DOUBLE_EQ(profile.time_range_ratio, 10.0);
+    EXPECT_GT(profile.time_cv, 0.0);
+    EXPECT_NEAR(profile.resource_load_ratio, 19.0 / 218.0, 1e-9);
+
+    const std::string text = TaskProfileBuilder::ToTaskProfileV1Text(profile);
+    EXPECT_NE(text.find("cv="), std::string::npos);
+    EXPECT_NE(text.find("range_ratio="), std::string::npos);
+    EXPECT_NE(text.find("load_ratio="), std::string::npos);
+    EXPECT_NE(text.find("avg_out_degree="), std::string::npos);
+    EXPECT_NE(text.find("max_out_degree="), std::string::npos);
 }
 
 TEST(Appoint__Test, simple) {
