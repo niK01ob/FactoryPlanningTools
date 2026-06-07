@@ -70,9 +70,7 @@ protected:
 ProblemData::ProblemData(std::ifstream& input) {
     // секция чтения божественного формата из файла
     std::string str;
-    while (!input.eof()) {
-        std::getline(input, str);
-
+    while (std::getline(input, str)) {
         if (str == "TOOLS") {
             FillTools(input);
         } else if (str == "OPERATIONS") {

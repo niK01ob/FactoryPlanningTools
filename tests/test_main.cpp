@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -88,7 +89,12 @@ void CompareMatrix(const std::vector<std::vector<uint64_t>>& left,
 }
 
 TEST(Updated_parser, base_parsing) {
-    std::ifstream input_file("../test_data/data.DAT");
+    std::filesystem::path data_path = "../test_data/data.DAT";
+    if (!std::filesystem::exists(data_path)) {
+        data_path = "test_data/data.DAT";
+    }
+    std::ifstream input_file(data_path);
+    ASSERT_TRUE(input_file.is_open()) << "Cannot open " << data_path;
     ProblemData test_data(input_file);
     input_file.close();
     ASSERT_EQ(test_data.operations.size(), 5u);
