@@ -30,6 +30,5 @@ find_package(GTest CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME}.tests
     PRIVATE
     GTest::gtest
-    GTest::gmock
     GTest::gtest_main
 )
