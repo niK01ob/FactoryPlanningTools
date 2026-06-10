@@ -126,6 +126,10 @@ public:
         }
     }
 
+    const std::set<NamedTimeInterval>& GetWorkProcess() const {
+        return work_process_;
+    }
+
     bool OperationDoneHere(size_t op_id)  const {
         for (const auto& gant : work_process_) {
             if (gant.operation == op_id) {

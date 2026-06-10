@@ -84,6 +84,7 @@ struct RunResult {
     long long llm_latency_ms = 0;
     int llm_used_fallback = 0;
     std::string llm_raw_response;
+    std::shared_ptr<ProblemData> solution;
 };
 
 struct MethodSpec {
@@ -203,6 +204,213 @@ std::string FormatTaskId(size_t task_id) {
     std::ostringstream out;
     out << "task_" << std::setw(6) << std::setfill('0') << task_id;
     return out.str();
+}
+
+std::string SafeFileName(const std::string& value) {
+    std::string out;
+    for (char c : value) {
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_' || c == '-') {
+            out.push_back(c);
+        } else {
+            out.push_back('_');
+        }
+    }
+    return out.empty() ? "unknown" : out;
+}
+
+std::vector<size_t> BuildOperationToWorkMap(const ProblemData& data) {
+    std::vector<size_t> op_to_work(
+        data.operations.size(), std::numeric_limits<size_t>::max());
+    for (size_t work_id = 0; work_id < data.works.size(); ++work_id) {
+        for (size_t op_id : data.works[work_id].operation_ids) {
+            if (op_id < op_to_work.size()) {
+                op_to_work[op_id] = work_id;
+            }
+        }
+    }
+    return op_to_work;
+}
+
+uint64_t WorkCompletionTime(const ProblemData& data, const Work& work) {
+    uint64_t completion = 0;
+    for (size_t op_id : work.operation_ids) {
+        if (op_id < data.operations.size()) {
+            completion = std::max(completion, data.operations[op_id].end_time);
+        }
+    }
+    return completion;
+}
+
+void WriteIdArray(std::ostream& out, const std::set<size_t>& ids) {
+    out << "[";
+    bool first = true;
+    for (size_t id : ids) {
+        if (!first) {
+            out << ", ";
+        }
+        out << id;
+        first = false;
+    }
+    out << "]";
+}
+
+void WriteSolutionJson(const ProblemData& data,
+                       const RunResult& result,
+                       size_t task_id,
+                       uint64_t seed,
+                       const std::string& method_name,
+                       const std::string& task_source,
+                       std::ostream& out) {
+    const auto op_to_work = BuildOperationToWorkMap(data);
+
+    out << "{\n";
+    out << "  \"format\": \"SOLUTION_VISUALIZATION_V1\",\n";
+    out << "  \"task_id\": " << task_id << ",\n";
+    out << "  \"seed\": " << seed << ",\n";
+    if (!task_source.empty()) {
+        out << "  \"task_source\": " << JsonQuote(task_source) << ",\n";
+    }
+    out << "  \"method\": " << JsonQuote(method_name) << ",\n";
+    out << "  \"selected_heuristic\": "
+        << JsonQuote(result.selected_heuristic) << ",\n";
+    out << "  \"valid\": " << (result.valid ? "true" : "false") << ",\n";
+    out << "  \"score\": " << result.score << ",\n";
+    out << "  \"runtime_ms\": " << result.runtime_ms << ",\n";
+    out << "  \"llm_latency_ms\": " << result.llm_latency_ms << ",\n";
+    out << "  \"llm_used_fallback\": " << result.llm_used_fallback << ",\n";
+
+    out << "  \"tools\": [\n";
+    for (size_t tool_id = 0; tool_id < data.tools.size(); ++tool_id) {
+        const auto& tool = data.tools[tool_id];
+        uint64_t busy_time = 0;
+        for (const auto& interval : tool.GetWorkProcess()) {
+            busy_time += interval.GetTimeSpan();
+        }
+        const uint64_t available_time = tool.GetTotalAvailableTime();
+        const double utilization =
+            available_time == 0
+                ? 0.0
+                : static_cast<double>(busy_time) /
+                      static_cast<double>(available_time);
+
+        out << "    {\n";
+        out << "      \"tool_id\": " << tool_id << ",\n";
+        out << "      \"available_time\": " << available_time << ",\n";
+        out << "      \"busy_time\": " << busy_time << ",\n";
+        out << "      \"utilization\": " << utilization << ",\n";
+        out << "      \"schedule\": [";
+        bool first_interval = true;
+        for (const auto& interval : tool.GetSchedule()) {
+            if (!first_interval) {
+                out << ", ";
+            }
+            out << "[" << interval.start << ", " << interval.end << "]";
+            first_interval = false;
+        }
+        out << "]\n";
+        out << "    }" << (tool_id + 1 == data.tools.size() ? "\n" : ",\n");
+    }
+    out << "  ],\n";
+
+    out << "  \"works\": [\n";
+    for (size_t work_id = 0; work_id < data.works.size(); ++work_id) {
+        const auto& work = data.works[work_id];
+        const uint64_t completion = WorkCompletionTime(data, work);
+        const uint64_t tardiness =
+            completion > work.directive ? completion - work.directive : 0;
+        const double penalty =
+            static_cast<double>(tardiness) * work.fine_coef;
+
+        out << "    {\n";
+        out << "      \"work_id\": " << work_id << ",\n";
+        out << "      \"start\": " << work.start_time << ",\n";
+        out << "      \"directive\": " << work.directive << ",\n";
+        out << "      \"fine\": " << work.fine_coef << ",\n";
+        out << "      \"completion\": " << completion << ",\n";
+        out << "      \"tardiness\": " << tardiness << ",\n";
+        out << "      \"penalty\": " << penalty << ",\n";
+        out << "      \"operations\": ";
+        WriteIdArray(out, work.operation_ids);
+        out << "\n";
+        out << "    }" << (work_id + 1 == data.works.size() ? "\n" : ",\n");
+    }
+    out << "  ],\n";
+
+    out << "  \"operations\": [\n";
+    for (size_t op_id = 0; op_id < data.operations.size(); ++op_id) {
+        const auto& op = data.operations[op_id];
+        out << "    {\n";
+        out << "      \"operation_id\": " << op_id << ",\n";
+        out << "      \"work_id\": ";
+        if (op_to_work[op_id] == std::numeric_limits<size_t>::max()) {
+            out << "null";
+        } else {
+            out << op_to_work[op_id];
+        }
+        out << ",\n";
+        out << "      \"start\": " << op.start_time << ",\n";
+        out << "      \"end\": " << op.end_time << ",\n";
+        out << "      \"stoppable\": "
+            << (op.stoppable ? "true" : "false") << ",\n";
+        out << "      \"parents\": ";
+        WriteIdArray(out, op.previous_op_id);
+        out << ",\n";
+        out << "      \"possible_tools\": ";
+        WriteIdArray(out, op.possible_tools);
+        out << "\n";
+        out << "    }" << (op_id + 1 == data.operations.size() ? "\n" : ",\n");
+    }
+    out << "  ],\n";
+
+    out << "  \"assignments\": [\n";
+    bool first_assignment = true;
+    for (size_t tool_id = 0; tool_id < data.tools.size(); ++tool_id) {
+        for (const auto& interval : data.tools[tool_id].GetWorkProcess()) {
+            const size_t op_id = interval.operation;
+            if (!first_assignment) {
+                out << ",\n";
+            }
+            out << "    {\n";
+            out << "      \"tool_id\": " << tool_id << ",\n";
+            out << "      \"operation_id\": " << op_id << ",\n";
+            out << "      \"work_id\": ";
+            if (op_id >= op_to_work.size() ||
+                op_to_work[op_id] == std::numeric_limits<size_t>::max()) {
+                out << "null";
+            } else {
+                out << op_to_work[op_id];
+            }
+            out << ",\n";
+            out << "      \"start\": " << interval.start << ",\n";
+            out << "      \"end\": " << interval.end << "\n";
+            out << "    }";
+            first_assignment = false;
+        }
+    }
+    out << "\n  ]\n";
+    out << "}\n";
+}
+
+bool WriteSolutionJsonFile(const std::filesystem::path& out_dir,
+                           const ProblemData& data,
+                           const RunResult& result,
+                           size_t task_id,
+                           uint64_t seed,
+                           const std::string& method_name,
+                           const std::string& task_source) {
+    std::filesystem::create_directories(out_dir);
+    const std::filesystem::path path =
+        out_dir / (FormatTaskId(task_id) + "_" + SafeFileName(method_name) +
+                   ".json");
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        std::cerr << "Cannot write solution JSON: " << path << "\n";
+        return false;
+    }
+    WriteSolutionJson(data, result, task_id, seed, method_name, task_source,
+                      out);
+    return true;
 }
 
 void WriteTaskDataV1(const ProblemData& data, std::ostream& out) {
@@ -533,7 +741,8 @@ int GenerateTaskDataset(size_t task_count,
 }
 
 RunResult RunMethod(const ProblemData& source_data, const MethodSpec& method,
-                    const LLMSelector::Config& llm_cfg, uint64_t seed) {
+                    const LLMSelector::Config& llm_cfg, uint64_t seed,
+                    bool export_solution_json) {
     RunResult result;
     result.selected_heuristic = method.name;
     result.llm_raw_response = "";
@@ -575,18 +784,47 @@ RunResult RunMethod(const ProblemData& source_data, const MethodSpec& method,
         }
     }
 
+    if (export_solution_json) {
+        result.solution = std::make_shared<ProblemData>(test_data);
+    }
+
+    return result;
+}
+
+RunResult RunLlmOnly(const ProblemData& source_data,
+                     const LLMSelector::Config& llm_cfg, uint64_t seed) {
+    RunResult result;
+    result.valid = true;
+
+    try {
+        const auto decision = LLMSelector::Select(&source_data, llm_cfg, seed);
+        result.selected_heuristic = decision.selected_label;
+        result.llm_latency_ms = decision.llm_latency_ms;
+        result.llm_used_fallback = decision.used_fallback ? 1 : 0;
+        result.llm_raw_response = decision.raw_response;
+    } catch (const std::exception& e) {
+        result.valid = false;
+        result.llm_used_fallback = 1;
+        result.llm_raw_response = std::string("ERROR: ") + e.what();
+    } catch (...) {
+        result.valid = false;
+        result.llm_used_fallback = 1;
+        result.llm_raw_response = "ERROR: unknown exception";
+    }
+
     return result;
 }
 
 std::vector<RunResult> RunMethodsForTask(
     const ProblemData& source_data, const std::vector<MethodSpec>& methods,
     const LLMSelector::Config& llm_cfg, uint64_t seed, size_t method_threads,
-    MethodThreadPool* method_pool) {
+    MethodThreadPool* method_pool, bool export_solution_json) {
     std::vector<RunResult> results(methods.size());
 
     if (method_threads <= 1 || methods.size() <= 1 || method_pool == nullptr) {
         for (size_t i = 0; i < methods.size(); ++i) {
-            results[i] = RunMethod(source_data, methods[i], llm_cfg, seed);
+            results[i] = RunMethod(source_data, methods[i], llm_cfg, seed,
+                                   export_solution_json);
         }
         return results;
     }
@@ -596,8 +834,10 @@ std::vector<RunResult> RunMethodsForTask(
 
     for (size_t i = 0; i < methods.size(); ++i) {
         futures.push_back(method_pool->Submit(
-            [&source_data, &methods, &llm_cfg, seed, i]() {
-                return RunMethod(source_data, methods[i], llm_cfg, seed);
+            [&source_data, &methods, &llm_cfg, seed, i,
+             export_solution_json]() {
+                return RunMethod(source_data, methods[i], llm_cfg, seed,
+                                 export_solution_json);
             }));
     }
 
@@ -653,6 +893,8 @@ void WriteExperimentConfig(const std::string& config_path,
                            size_t method_threads,
                            const std::string& long_results,
                            const std::string& wide_results,
+                           bool export_solution_json,
+                           const std::string& solution_json_dir,
                            const std::vector<MethodSpec>& methods) {
     std::ofstream yaml(config_path);
     if (!yaml.is_open()) {
@@ -675,10 +917,150 @@ void WriteExperimentConfig(const std::string& config_path,
     yaml << "  method_threads: " << method_threads << "\n";
     yaml << "  long_results: " << long_results << "\n";
     yaml << "  wide_results: " << wide_results << "\n";
+    yaml << "  export_solution_json: "
+         << (export_solution_json ? "true" : "false") << "\n";
+    if (export_solution_json) {
+        yaml << "  solution_json_dir: " << solution_json_dir << "\n";
+    }
     yaml << "  methods:\n";
     for (const auto& m : methods) {
         yaml << "    - " << m.name << "\n";
     }
+}
+
+void WriteLlmOnlyConfig(const std::string& config_path,
+                        size_t task_count,
+                        const std::string& source,
+                        const std::string& source_path,
+                        const std::string& difficulty,
+                        uint64_t base_seed,
+                        const LLMSelector::Config& llm_cfg,
+                        const std::string& output_csv) {
+    std::ofstream yaml(config_path);
+    if (!yaml.is_open()) {
+        return;
+    }
+    yaml << "experiment:\n";
+    yaml << "  mode: llm_only\n";
+    yaml << "  task_count: " << task_count << "\n";
+    yaml << "  source: " << source << "\n";
+    if (!source_path.empty()) {
+        yaml << "  source_path: " << source_path << "\n";
+    }
+    if (!difficulty.empty()) {
+        yaml << "  difficulty: " << difficulty << "\n";
+    }
+    yaml << "  base_seed: " << base_seed << "\n";
+    yaml << "  llm_mode: " << llm_cfg.mode << "\n";
+    yaml << "  llm_model: " << llm_cfg.model << "\n";
+    yaml << "  llm_timeout_ms: " << llm_cfg.timeout_ms << "\n";
+    yaml << "  llm_endpoint: " << llm_cfg.endpoint << "\n";
+    yaml << "  output_csv: " << output_csv << "\n";
+    yaml << "  solver_enabled: false\n";
+    yaml << "  solution_json_enabled: false\n";
+}
+
+int RunLlmOnlyTaskFiles(const std::vector<std::filesystem::path>& task_files,
+                        const LLMSelector::Config& llm_cfg,
+                        uint64_t base_seed,
+                        const std::string& output_csv_path,
+                        const std::string& config_path,
+                        const std::string& source,
+                        const std::string& source_path) {
+    if (task_files.empty()) {
+        std::cerr << "No .task files found for LLM-only run\n";
+        return 1;
+    }
+
+    std::ofstream csv(output_csv_path);
+    if (!csv.is_open()) {
+        std::cerr << "Cannot open output file: " << output_csv_path
+                  << std::endl;
+        return 1;
+    }
+
+    csv << "task_id,seed,task_source,valid,selected_heuristic,"
+        << "llm_latency_ms,llm_used_fallback,llm_raw_response\n";
+
+    size_t success = 0;
+    size_t fail = 0;
+    size_t fallback = 0;
+
+    WriteLlmOnlyConfig(config_path, task_files.size(), source, source_path, "",
+                       base_seed, llm_cfg, output_csv_path);
+
+    for (size_t task_id = 0; task_id < task_files.size(); ++task_id) {
+        const uint64_t seed = base_seed + task_id * 7919;
+        const auto& path = task_files[task_id];
+        ProblemData source_data = ReadTaskDataV1File(path);
+        const RunResult result = RunLlmOnly(source_data, llm_cfg, seed);
+
+        success += result.valid ? 1 : 0;
+        fail += result.valid ? 0 : 1;
+        fallback += result.llm_used_fallback ? 1 : 0;
+
+        csv << task_id << "," << seed << "," << CsvQuote(path.string())
+            << "," << (result.valid ? 1 : 0) << ","
+            << result.selected_heuristic << "," << result.llm_latency_ms
+            << "," << result.llm_used_fallback << ","
+            << CsvQuote(result.llm_raw_response) << "\n";
+    }
+
+    std::cout << "Loaded task files: " << task_files.size() << "\n";
+    std::cout << "Saved LLM-only responses to: " << output_csv_path << "\n";
+    std::cout << "Saved experiment config to: " << config_path << "\n";
+    std::cout << "[llm_only] success=" << success << " fail=" << fail
+              << " fallback=" << fallback << "\n";
+    return 0;
+}
+
+int RunLlmOnlyGeneratedTasks(size_t task_count,
+                             GeneratorData::DifficultyPreset difficulty,
+                             uint64_t base_seed,
+                             const LLMSelector::Config& llm_cfg,
+                             const std::string& output_csv_path,
+                             const std::string& config_path) {
+    std::ofstream csv(output_csv_path);
+    if (!csv.is_open()) {
+        std::cerr << "Cannot open output file: " << output_csv_path
+                  << std::endl;
+        return 1;
+    }
+
+    csv << "task_id,seed,task_source,valid,selected_heuristic,"
+        << "llm_latency_ms,llm_used_fallback,llm_raw_response\n";
+
+    size_t success = 0;
+    size_t fail = 0;
+    size_t fallback = 0;
+    GeneratorData generator(difficulty);
+
+    WriteLlmOnlyConfig(config_path, task_count, "generated", "",
+                       DifficultyToName(difficulty), base_seed, llm_cfg,
+                       output_csv_path);
+
+    for (size_t task_id = 0; task_id < task_count; ++task_id) {
+        const uint64_t seed = base_seed + task_id * 7919;
+        generator.Generate(seed);
+        ProblemData source_data((*generator.GetData()));
+        const RunResult result = RunLlmOnly(source_data, llm_cfg, seed);
+
+        success += result.valid ? 1 : 0;
+        fail += result.valid ? 0 : 1;
+        fallback += result.llm_used_fallback ? 1 : 0;
+
+        csv << task_id << "," << seed << ",generated,"
+            << (result.valid ? 1 : 0) << "," << result.selected_heuristic
+            << "," << result.llm_latency_ms << ","
+            << result.llm_used_fallback << ","
+            << CsvQuote(result.llm_raw_response) << "\n";
+    }
+
+    std::cout << "Saved LLM-only responses to: " << output_csv_path << "\n";
+    std::cout << "Saved experiment config to: " << config_path << "\n";
+    std::cout << "[llm_only] success=" << success << " fail=" << fail
+              << " fallback=" << fallback << "\n";
+    return 0;
 }
 
 int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
@@ -691,7 +1073,9 @@ int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
                  const std::string& wide_csv_path,
                  const std::string& config_path,
                  const std::string& source,
-                 const std::string& source_path) {
+                 const std::string& source_path,
+                 bool export_solution_json,
+                 const std::filesystem::path& solution_json_dir) {
     if (task_files.empty()) {
         std::cerr << "No .task files found for dataset run\n";
         return 1;
@@ -725,7 +1109,8 @@ int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
 
     WriteExperimentConfig(config_path, task_files.size(), source, source_path,
                           "", base_seed, llm_cfg, method_threads,
-                          long_csv_path, wide_csv_path, methods);
+                          long_csv_path, wide_csv_path, export_solution_json,
+                          solution_json_dir.string(), methods);
 
     for (size_t task_id = 0; task_id < task_files.size(); ++task_id) {
         const uint64_t seed = base_seed + task_id * 7919;
@@ -734,7 +1119,8 @@ int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
 
         const auto task_results =
             RunMethodsForTask(source_data, methods, llm_cfg, seed,
-                              method_threads, method_pool);
+                              method_threads, method_pool,
+                              export_solution_json);
 
         const std::string task_source = path.string();
         for (size_t i = 0; i < methods.size(); ++i) {
@@ -758,6 +1144,12 @@ int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
                      << "," << result.llm_latency_ms << ","
                      << result.llm_used_fallback << ","
                      << CsvQuote(result.llm_raw_response) << "\n";
+
+            if (export_solution_json && result.solution) {
+                WriteSolutionJsonFile(solution_json_dir, *result.solution,
+                                      result, task_id, seed, method.name,
+                                      task_source);
+            }
         }
 
         csv_wide << task_id << "," << seed << "," << CsvQuote(task_source);
@@ -774,6 +1166,10 @@ int RunTaskFiles(const std::vector<std::filesystem::path>& task_files,
     std::cout << "Saved long baseline results to: " << long_csv_path << "\n";
     std::cout << "Saved wide baseline results to: " << wide_csv_path << "\n";
     std::cout << "Saved experiment config to: " << config_path << "\n";
+    if (export_solution_json) {
+        std::cout << "Saved solution JSON files to: " << solution_json_dir
+                  << "\n";
+    }
 
     for (const auto& m : methods) {
         const Metric& mm = metrics[m.name];
@@ -794,9 +1190,12 @@ int main(int argc, char** argv) {
     size_t task_count = 1000;
     size_t method_threads = 1;
     bool generate_only = false;
+    bool llm_only = false;
+    bool export_solution_json = false;
     bool task_count_explicit = false;
     uint64_t base_seed = 0;
     std::filesystem::path out_dir = "generated_tasks";
+    std::filesystem::path solution_json_dir = "solution_json";
     std::filesystem::path task_file;
     std::filesystem::path tasks_dir;
     GeneratorData::DifficultyPreset difficulty =
@@ -809,6 +1208,12 @@ int main(int argc, char** argv) {
             llm_cfg.mode = a.substr(6);
         } else if (a == "--generate-only") {
             generate_only = true;
+        } else if (a == "--llm-only") {
+            llm_only = true;
+        } else if (a == "--export-solution-json") {
+            export_solution_json = true;
+        } else if (a.rfind("--solution-json-dir=", 0) == 0) {
+            solution_json_dir = a.substr(20);
         } else if (a.rfind("--tasks=", 0) == 0) {
             task_count = static_cast<size_t>(std::stoull(a.substr(8)));
             task_count_explicit = true;
@@ -854,7 +1259,44 @@ int main(int argc, char** argv) {
 
     const std::string kLongCsvPath = "baseline_results_long.csv";
     const std::string kWideCsvPath = "baseline_results_wide.csv";
+    const std::string kLlmOnlyCsvPath = "llm_responses.csv";
     const std::string kConfigPath = "experiment_config.yaml";
+
+    if (llm_only) {
+        if (!LLMSelector::IsEnabled(llm_cfg)) {
+            std::cerr << "--llm-only requires enabled LLM selector "
+                      << "(use --llm=real, --llm=mock, or "
+                      << "LLM_SELECTOR_MODE)\n";
+            return 1;
+        }
+        if (export_solution_json) {
+            std::cerr << "--export-solution-json is ignored in --llm-only "
+                      << "mode because solver is not run\n";
+        }
+
+        if (!task_file.empty() || !tasks_dir.empty()) {
+            try {
+                const size_t max_files =
+                    (!tasks_dir.empty() && task_count_explicit) ? task_count : 0;
+                const auto task_files =
+                    CollectTaskFiles(task_file, tasks_dir, max_files);
+                const std::string source = !task_file.empty() ? "task_file"
+                                                              : "tasks_dir";
+                const std::string source_path =
+                    (!task_file.empty() ? task_file : tasks_dir).string();
+                return RunLlmOnlyTaskFiles(task_files, llm_cfg, base_seed,
+                                           kLlmOnlyCsvPath, kConfigPath,
+                                           source, source_path);
+            } catch (const std::exception& e) {
+                std::cerr << "LLM-only run failed: " << e.what() << "\n";
+                return 1;
+            }
+        }
+
+        return RunLlmOnlyGeneratedTasks(task_count, difficulty, base_seed,
+                                        llm_cfg, kLlmOnlyCsvPath,
+                                        kConfigPath);
+    }
 
     const std::array<Solver::HeuristicType, 9> kHeuristics{
         Solver::HeuristicType::Dummy, Solver::HeuristicType::Directive,
@@ -892,7 +1334,8 @@ int main(int argc, char** argv) {
             return RunTaskFiles(task_files, methods, llm_cfg, base_seed,
                                 method_threads, method_pool.get(),
                                 kLongCsvPath, kWideCsvPath, kConfigPath,
-                                source, source_path);
+                                source, source_path, export_solution_json,
+                                solution_json_dir);
         } catch (const std::exception& e) {
             std::cerr << "Dataset run failed: " << e.what() << "\n";
             return 1;
@@ -938,6 +1381,12 @@ int main(int argc, char** argv) {
         yaml << "  method_threads: " << method_threads << "\n";
         yaml << "  long_results: " << kLongCsvPath << "\n";
         yaml << "  wide_results: " << kWideCsvPath << "\n";
+        yaml << "  export_solution_json: "
+             << (export_solution_json ? "true" : "false") << "\n";
+        if (export_solution_json) {
+            yaml << "  solution_json_dir: " << solution_json_dir.string()
+                 << "\n";
+        }
         yaml << "  methods:\n";
         for (const auto& m : methods) {
             yaml << "    - " << m.name << "\n";
@@ -952,7 +1401,7 @@ int main(int argc, char** argv) {
 
         const auto task_results =
             RunMethodsForTask(source_data, methods, llm_cfg, seed, method_threads,
-                              method_pool.get());
+                              method_pool.get(), export_solution_json);
 
         for (size_t i = 0; i < methods.size(); ++i) {
             const auto& method = methods[i];
@@ -974,6 +1423,11 @@ int main(int argc, char** argv) {
                      << "," << result.llm_latency_ms << ","
                      << result.llm_used_fallback << ","
                      << CsvQuote(result.llm_raw_response) << "\n";
+
+            if (export_solution_json && result.solution) {
+                WriteSolutionJsonFile(solution_json_dir, *result.solution,
+                                      result, task_id, seed, method.name, "");
+            }
         }
 
         csv_wide << task_id << "," << seed;
@@ -992,6 +1446,10 @@ int main(int argc, char** argv) {
     std::cout << "Saved long baseline results to: " << kLongCsvPath << "\n";
     std::cout << "Saved wide baseline results to: " << kWideCsvPath << "\n";
     std::cout << "Saved experiment config to: " << kConfigPath << "\n";
+    if (export_solution_json) {
+        std::cout << "Saved solution JSON files to: " << solution_json_dir
+                  << "\n";
+    }
 
     for (const auto& m : methods) {
         const Metric& mm = metrics[m.name];

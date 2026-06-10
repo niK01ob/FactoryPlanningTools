@@ -5,3 +5,5 @@ build-gcc
 baseline_results_*.csv
 experiment_config.yaml
 pdf_extracted.txt
+__pycache__/
+*.pyc
