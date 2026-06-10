@@ -197,6 +197,12 @@ class ScheduleVisualizer(tk.Tk):
             self.op_tree.column(col, width=width, anchor=tk.E, stretch=False)
         self.op_tree.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
 
+        ttk.Button(
+            self.left,
+            text="Граф зависимостей",
+            command=self.open_dependency_graph,
+        ).pack(fill=tk.X, pady=(8, 0))
+
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self.right)
         self.tabs.pack(fill=tk.BOTH, expand=True)
@@ -673,6 +679,35 @@ class ScheduleVisualizer(tk.Tk):
             self.selected_assignment = assignments[0]
             self._refresh_detail_text()
 
+    def open_dependency_graph(self):
+        if not self.data:
+            messagebox.showinfo("Граф зависимостей", "Сначала откройте JSON-файл.")
+            return
+
+        work_id = self._current_work_id()
+        if work_id is None:
+            selection = self.work_tree.selection()
+            if selection:
+                work_id = as_int(selection[0], None)
+        if work_id is None:
+            messagebox.showinfo(
+                "Граф зависимостей",
+                "Выберите одну работу в списке или фильтре.",
+            )
+            return
+
+        work = self.work_by_id.get(work_id)
+        if not work:
+            messagebox.showerror("Граф зависимостей", f"Работа {work_id} не найдена.")
+            return
+
+        selected_op_id = None
+        op_selection = self.op_tree.selection()
+        if op_selection:
+            selected_op_id = as_int(op_selection[0], None)
+
+        DependencyGraphWindow(self, work, self.operation_by_id, selected_op_id)
+
     def _on_gantt_click(self, event):
         canvas = self.gantt_canvas
         x = canvas.canvasx(event.x)
@@ -742,6 +777,262 @@ class ScheduleVisualizer(tk.Tk):
         else:
             nice = 10
         return int(nice * magnitude)
+
+
+class DependencyGraphWindow(tk.Toplevel):
+    def __init__(self, master, work, operation_by_id, selected_op_id=None):
+        super().__init__(master)
+        self.work = work
+        self.operation_by_id = operation_by_id
+        self.selected_op_id = selected_op_id
+        self.node_tags = {}
+        self.title(f"Граф зависимостей: работа {work.get('work_id')}")
+        self.geometry("1100x720")
+        self.minsize(780, 480)
+
+        self._build_ui()
+        self._draw_graph()
+        self._show_operation(selected_op_id)
+
+    def _build_ui(self):
+        root = ttk.Frame(self, padding=8)
+        root.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Frame(root)
+        header.pack(fill=tk.X)
+        ttk.Label(
+            header,
+            text=(
+                f"Работа {self.work.get('work_id')}  "
+                f"старт={self.work.get('start')}  "
+                f"срок={self.work.get('directive')}  "
+                f"финиш={self.work.get('completion')}  "
+                f"штраф={self.work.get('penalty')}"
+            ),
+        ).pack(side=tk.LEFT)
+
+        body = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
+        body.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+
+        graph_frame = ttk.Frame(body)
+        info_frame = ttk.Frame(body, width=280)
+        body.add(graph_frame, weight=1)
+        body.add(info_frame, weight=0)
+
+        self.canvas = tk.Canvas(graph_frame, bg="white", highlightthickness=0)
+        self.vbar = ttk.Scrollbar(
+            graph_frame, orient=tk.VERTICAL, command=self.canvas.yview
+        )
+        self.hbar = ttk.Scrollbar(
+            graph_frame, orient=tk.HORIZONTAL, command=self.canvas.xview
+        )
+        self.canvas.configure(
+            yscrollcommand=self.vbar.set,
+            xscrollcommand=self.hbar.set,
+        )
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.vbar.grid(row=0, column=1, sticky="ns")
+        self.hbar.grid(row=1, column=0, sticky="ew")
+        graph_frame.rowconfigure(0, weight=1)
+        graph_frame.columnconfigure(0, weight=1)
+
+        ttk.Label(info_frame, text="Операция").pack(anchor=tk.W)
+        self.info_text = tk.Text(
+            info_frame,
+            width=34,
+            wrap=tk.WORD,
+            borderwidth=1,
+            relief=tk.SOLID,
+            font=("Consolas", 10),
+        )
+        self.info_text.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+        self.info_text.configure(state=tk.DISABLED)
+
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<MouseWheel>", self._on_canvas_wheel)
+
+    def _draw_graph(self):
+        self.canvas.delete("all")
+        op_ids = [as_int(op_id) for op_id in self.work.get("operations", [])]
+        op_ids = [op_id for op_id in op_ids if op_id in self.operation_by_id]
+        if not op_ids:
+            self.canvas.create_text(
+                24,
+                24,
+                anchor=tk.NW,
+                text="В работе нет операций для отображения.",
+            )
+            return
+
+        op_set = set(op_ids)
+        children = {op_id: [] for op_id in op_ids}
+        parents = {op_id: [] for op_id in op_ids}
+        for op_id in op_ids:
+            op = self.operation_by_id[op_id]
+            for parent_id in op.get("parents", []):
+                parent_id = as_int(parent_id)
+                if parent_id in op_set:
+                    parents[op_id].append(parent_id)
+                    children[parent_id].append(op_id)
+
+        depths = {}
+
+        def depth(op_id, visiting=None):
+            if op_id in depths:
+                return depths[op_id]
+            visiting = set() if visiting is None else visiting
+            if op_id in visiting:
+                return 0
+            visiting.add(op_id)
+            if not parents[op_id]:
+                depths[op_id] = 0
+            else:
+                depths[op_id] = 1 + max(depth(parent, visiting) for parent in parents[op_id])
+            visiting.remove(op_id)
+            return depths[op_id]
+
+        for op_id in op_ids:
+            depth(op_id)
+
+        layers = {}
+        for op_id in sorted(op_ids):
+            layers.setdefault(depths[op_id], []).append(op_id)
+
+        node_w = 138
+        node_h = 68
+        x_gap = 82
+        y_gap = 34
+        left = 48
+        top = 48
+        positions = {}
+        for layer_idx in sorted(layers):
+            layer = layers[layer_idx]
+            for row_idx, op_id in enumerate(layer):
+                x = left + layer_idx * (node_w + x_gap)
+                y = top + row_idx * (node_h + y_gap)
+                positions[op_id] = (x, y)
+
+        max_layer_size = max(len(layer) for layer in layers.values())
+        width = left * 2 + (max(layers) + 1) * (node_w + x_gap)
+        height = top * 2 + max_layer_size * (node_h + y_gap)
+
+        self.canvas.create_text(
+            left,
+            16,
+            anchor=tk.W,
+            text="Стрелка показывает зависимость: предыдущая операция -> текущая операция",
+            fill="#5B6472",
+        )
+
+        for parent_id, child_ids in children.items():
+            if parent_id not in positions:
+                continue
+            px, py = positions[parent_id]
+            for child_id in child_ids:
+                if child_id not in positions:
+                    continue
+                cx, cy = positions[child_id]
+                self.canvas.create_line(
+                    px + node_w,
+                    py + node_h / 2,
+                    cx,
+                    cy + node_h / 2,
+                    fill="#6B7280",
+                    width=2,
+                    arrow=tk.LAST,
+                    smooth=True,
+                    splinesteps=16,
+                )
+
+        self.node_tags = {}
+        for op_id in op_ids:
+            x, y = positions[op_id]
+            op = self.operation_by_id[op_id]
+            is_selected = op_id == self.selected_op_id
+            fill = "#FFF7E6" if is_selected else "#F8FAFC"
+            outline = "#F28E2B" if is_selected else "#2F3A4A"
+            tag = f"node_{op_id}"
+            self.node_tags[tag] = op_id
+            self.canvas.create_rectangle(
+                x,
+                y,
+                x + node_w,
+                y + node_h,
+                fill=fill,
+                outline=outline,
+                width=2 if is_selected else 1,
+                tags=(tag, "node"),
+            )
+            self.canvas.create_text(
+                x + 10,
+                y + 10,
+                anchor=tk.NW,
+                text=f"Операция {op_id}",
+                font=("Segoe UI", 9, "bold"),
+                fill="#1F2937",
+                tags=(tag, "node"),
+            )
+            self.canvas.create_text(
+                x + 10,
+                y + 32,
+                anchor=tk.NW,
+                text=f"{op.get('start')} - {op.get('end')}",
+                fill="#374151",
+                tags=(tag, "node"),
+            )
+            stoppable = "прер." if op.get("stoppable") else "непрер."
+            self.canvas.create_text(
+                x + 10,
+                y + 50,
+                anchor=tk.NW,
+                text=stoppable,
+                fill="#6B7280",
+                tags=(tag, "node"),
+            )
+
+        self.canvas.configure(scrollregion=(0, 0, width, height))
+
+    def _on_canvas_click(self, event):
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+        items = self.canvas.find_overlapping(x, y, x, y)
+        for item in reversed(items):
+            for tag in self.canvas.gettags(item):
+                op_id = self.node_tags.get(tag)
+                if op_id is not None:
+                    self.selected_op_id = op_id
+                    self._draw_graph()
+                    self._show_operation(op_id)
+                    return
+
+    def _show_operation(self, op_id):
+        if op_id is None or op_id not in self.operation_by_id:
+            text = "Выберите узел операции на графе."
+        else:
+            op = self.operation_by_id[op_id]
+            text = "\n".join(
+                [
+                    f"Операция {op_id}",
+                    "",
+                    f"Старт: {op.get('start')}",
+                    f"Конец: {op.get('end')}",
+                    f"Прерываемая: {op.get('stoppable')}",
+                    f"Предшественники: {op.get('parents')}",
+                    f"Допустимые исполнители: {op.get('possible_tools')}",
+                    "",
+                    "В графе показаны только зависимости внутри выбранной работы.",
+                ]
+            )
+        self.info_text.configure(state=tk.NORMAL)
+        self.info_text.delete("1.0", tk.END)
+        self.info_text.insert("1.0", text)
+        self.info_text.configure(state=tk.DISABLED)
+
+    def _on_canvas_wheel(self, event):
+        if event.state & 0x0001:
+            self.canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        else:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
 
 def parse_args():

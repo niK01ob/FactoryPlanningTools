@@ -276,7 +276,8 @@ python scripts/visualize_solution.py build-gcc/solution_json/task_000000_directi
 Если путь не передан, файл можно выбрать кнопкой `Открыть JSON`. В окне
 доступны диаграмма Ганта по исполнителям, выбор конкретной работы, фильтр по
 исполнителю, отдельная вкладка загруженности и панель детальной информации по
-работам/операциям.
+работам/операциям. Для выбранной работы можно открыть отдельное окно графа
+зависимостей операций.
 
 `long` CSV колонки:
 - `task_id,seed,method,valid,score,runtime_ms,selected_heuristic,llm_latency_ms,llm_used_fallback,llm_raw_response`
