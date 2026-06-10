@@ -1298,10 +1298,9 @@ int main(int argc, char** argv) {
                                         kConfigPath);
     }
 
-    const std::array<Solver::HeuristicType, 9> kHeuristics{
-        Solver::HeuristicType::Dummy, Solver::HeuristicType::Directive,
-        Solver::HeuristicType::Fine, Solver::HeuristicType::RoundRobin,
-        Solver::HeuristicType::Dependent,
+    const std::array<Solver::HeuristicType, 8> kHeuristics{
+        Solver::HeuristicType::Directive, Solver::HeuristicType::Fine,
+        Solver::HeuristicType::RoundRobin, Solver::HeuristicType::Dependent,
         Solver::HeuristicType::ShortestProcessingTime,
         Solver::HeuristicType::LongestProcessingTime,
         Solver::HeuristicType::LeastFlexible,

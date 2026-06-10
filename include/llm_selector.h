@@ -125,8 +125,6 @@ public:
     static std::string SystemPrompt() {
         return "You choose one front-sorting heuristic for a production scheduling "
                "solver. Available heuristics: "
-               "DUMMY keeps the original front order; it can be strong when the "
-               "task is easy, sparse, or has enough slack. "
                "DIRECTIVE prioritizes works with earlier deadlines; it is often "
                "strong when deadlines are tight or slack is small. "
                "FINE prioritizes works with larger lateness penalty; use it when "
@@ -147,7 +145,7 @@ public:
                "processing-time spread, resource load, fine spread, operation "
                "count, and work count. Choose the heuristic with "
                "the highest internal score. Break ties by expected lower final "
-               "penalty, not by name order. Return exactly one token from: DUMMY, "
+               "penalty, not by name order. Return exactly one token from: "
                "DIRECTIVE, FINE, ROUND_ROBIN, DEPENDENT, SPT, LPT, "
                "LEAST_FLEXIBLE, SLACK_BASED. Do not output the scores. No "
                "explanations.";
@@ -204,10 +202,6 @@ private:
         }
         if (u.find("DIRECTIVE") != std::string::npos) {
             out = Solver::HeuristicType::Directive;
-            return true;
-        }
-        if (u.find("DUMMY") != std::string::npos) {
-            out = Solver::HeuristicType::Dummy;
             return true;
         }
         if (u.find("FINE") != std::string::npos) {
@@ -380,9 +374,6 @@ private:
         }
         if (p.mean_time < 80.0 && p.n_operations > 50) {
             return "SPT";
-        }
-        if ((seed % 17) == 0) {
-            return "DUMMY";
         }
         return "DIRECTIVE";
     }
