@@ -5,6 +5,8 @@
 #include <string>
 
 #include "problem_data.h"
+#include "scorer.h"
+#include "solution_checker.h"
 #include "task_profile.h"
 #include "tool.h"
 #include "work.h"
@@ -148,6 +150,42 @@ TEST(TaskProfile__Test, reference_features_are_compactly_serialized) {
     EXPECT_NE(text.find("load_ratio="), std::string::npos);
     EXPECT_NE(text.find("avg_out_degree="), std::string::npos);
     EXPECT_NE(text.find("max_out_degree="), std::string::npos);
+}
+
+TEST(Scorer__Test, adds_penalty_for_unappointed_operations) {
+    ProblemData data;
+    data.operations.emplace_back(true, std::set<size_t>{}, std::set<size_t>{0});
+    data.operations.emplace_back(true, std::set<size_t>{}, std::set<size_t>{0});
+    data.operations[0].start_time = 1;
+    data.operations[0].end_time = 15;
+    data.works.emplace_back(0, 10, 2.0, std::set<size_t>{0, 1});
+
+    EXPECT_DOUBLE_EQ(Scorer::CalculateScore(&data),
+                     Scorer::kNotAppointedOperationFine + 10.0);
+}
+
+TEST(SolutionChecker__Test, allows_unappointed_operations) {
+    ProblemData data;
+    data.operations.emplace_back(true, std::set<size_t>{}, std::set<size_t>{0});
+    data.tools.emplace_back(std::set<Tool::TimeInterval>{{0, 10}});
+    data.times_matrix = {{5}};
+    data.works.emplace_back(0, 10, 1.0, std::set<size_t>{0});
+
+    EXPECT_NO_THROW(SolutionChecker::Check(&data));
+}
+
+TEST(SolutionChecker__Test, rejects_appointed_operation_with_unappointed_parent) {
+    ProblemData data;
+    data.operations.emplace_back(true, std::set<size_t>{}, std::set<size_t>{0});
+    data.operations.emplace_back(true, std::set<size_t>{0}, std::set<size_t>{0});
+    data.tools.emplace_back(std::set<Tool::TimeInterval>{{0, 10}});
+    data.times_matrix = {{5}, {5}};
+    data.works.emplace_back(0, 10, 1.0, std::set<size_t>{0, 1});
+    data.operations[1].start_time = 1;
+    data.operations[1].end_time = 6;
+    data.tools[0].Appoint(data.operations[1], 1, 1, 5);
+
+    EXPECT_THROW(SolutionChecker::Check(&data), std::runtime_error);
 }
 
 TEST(Appoint__Test, simple) {

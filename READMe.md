@@ -17,7 +17,7 @@ C++ проект для экспериментов по производстве
 - `slack_based` (операции работ с наименьшим оценочным запасом времени)
 - Проверка корректности решения: `SolutionChecker`.
 - Подсчёт штрафа: `Scorer`.
-- Новый генератор задач: `GeneratorDataV2` с preset-сложностью:
+- Новый генератор задач: `GeneratorData` с preset-сложностью:
 - быстрые smoke-пресеты: `small_easy|small_medium|small_hard`;
 - крупные экспериментальные пресеты: `easy|medium|hard`.
 - Batch-runner в `main` с выгрузкой:
@@ -36,7 +36,7 @@ C++ проект для экспериментов по производстве
 
 - `include/problem_data.h` — парсер и агрегатор задачи.
 - `include/solver.h` — фронтальный алгоритм + эвристики.
-- `include/generator_data_v2.h` — новый генератор задач.
+- `include/generator_data.h` — новый генератор задач.
 - `include/task_profile.h` — извлечение признаков и `TASK_PROFILE_V1`.
 - `include/llm_selector.h` — selector (`off/mock/real`) + fallback.
 - `src/main.cpp` — batch-прогоны и сохранение артефактов.

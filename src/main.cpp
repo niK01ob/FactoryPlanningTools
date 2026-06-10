@@ -1,4 +1,4 @@
-#include <array>
+﻿#include <array>
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-#include "generator_data_v2.h"
+#include "generator_data.h"
 #include "llm_selector.h"
 #include "scorer.h"
 #include "solution_checker.h"
@@ -51,19 +51,19 @@ const char* ToName(Solver::HeuristicType h) {
     return "unknown";
 }
 
-const char* DifficultyToName(GeneratorDataV2::DifficultyPreset d) {
+const char* DifficultyToName(GeneratorData::DifficultyPreset d) {
     switch (d) {
-        case GeneratorDataV2::DifficultyPreset::SmallEasy:
+        case GeneratorData::DifficultyPreset::SmallEasy:
             return "small_easy";
-        case GeneratorDataV2::DifficultyPreset::SmallMedium:
+        case GeneratorData::DifficultyPreset::SmallMedium:
             return "small_medium";
-        case GeneratorDataV2::DifficultyPreset::SmallHard:
+        case GeneratorData::DifficultyPreset::SmallHard:
             return "small_hard";
-        case GeneratorDataV2::DifficultyPreset::Easy:
+        case GeneratorData::DifficultyPreset::Easy:
             return "easy";
-        case GeneratorDataV2::DifficultyPreset::Medium:
+        case GeneratorData::DifficultyPreset::Medium:
             return "medium";
-        case GeneratorDataV2::DifficultyPreset::Hard:
+        case GeneratorData::DifficultyPreset::Hard:
             return "hard";
     }
     return "unknown";
@@ -428,7 +428,7 @@ void WriteTaskProfileCsvRow(size_t task_id, uint64_t seed, const TaskProfile& p,
 }
 
 int GenerateTaskDataset(size_t task_count,
-                        GeneratorDataV2::DifficultyPreset difficulty,
+                        GeneratorData::DifficultyPreset difficulty,
                         uint64_t base_seed,
                         const std::filesystem::path& out_dir) {
     std::filesystem::create_directories(out_dir / "tasks");
@@ -465,7 +465,7 @@ int GenerateTaskDataset(size_t task_count,
     manifest << "  profiles_csv: task_profiles.csv\n";
     manifest << "  prompts_jsonl: prompts.jsonl\n";
 
-    GeneratorDataV2 generator(difficulty);
+    GeneratorData generator(difficulty);
     const std::string system_prompt = LLMSelector::SystemPrompt();
 
     for (size_t task_id = 0; task_id < task_count; ++task_id) {
@@ -537,9 +537,9 @@ RunResult RunMethod(const ProblemData& source_data, const MethodSpec& method,
     RunResult result;
     result.selected_heuristic = method.name;
     result.llm_raw_response = "";
+    ProblemData test_data(source_data);
 
     try {
-        ProblemData test_data(source_data);
         Solver::HeuristicType heuristic = method.heuristic;
 
         if (method.is_llm) {
@@ -558,16 +558,18 @@ RunResult RunMethod(const ProblemData& source_data, const MethodSpec& method,
             std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1)
                 .count();
 
+        result.score = Scorer::CalculateScore(&test_data);
         SolutionChecker::Check(&test_data);
         result.valid = true;
-        result.score = Scorer::CalculateScore(&test_data);
     } catch (const std::exception& e) {
         result.valid = false;
+        result.score = Scorer::CalculateScore(&test_data);
         if (result.llm_raw_response.empty()) {
             result.llm_raw_response = std::string("ERROR: ") + e.what();
         }
     } catch (...) {
         result.valid = false;
+        result.score = Scorer::CalculateScore(&test_data);
         if (result.llm_raw_response.empty()) {
             result.llm_raw_response = "ERROR: unknown exception";
         }
@@ -797,8 +799,8 @@ int main(int argc, char** argv) {
     std::filesystem::path out_dir = "generated_tasks";
     std::filesystem::path task_file;
     std::filesystem::path tasks_dir;
-    GeneratorDataV2::DifficultyPreset difficulty =
-        GeneratorDataV2::DifficultyPreset::SmallEasy;
+    GeneratorData::DifficultyPreset difficulty =
+        GeneratorData::DifficultyPreset::SmallEasy;
 
     LLMSelector::Config llm_cfg = LLMSelector::ConfigFromEnv();
     for (int i = 1; i < argc; ++i) {
@@ -821,17 +823,17 @@ int main(int argc, char** argv) {
         } else if (a.rfind("--difficulty=", 0) == 0) {
             const std::string d = a.substr(13);
             if (d == "small_easy") {
-                difficulty = GeneratorDataV2::DifficultyPreset::SmallEasy;
+                difficulty = GeneratorData::DifficultyPreset::SmallEasy;
             } else if (d == "small_medium") {
-                difficulty = GeneratorDataV2::DifficultyPreset::SmallMedium;
+                difficulty = GeneratorData::DifficultyPreset::SmallMedium;
             } else if (d == "small_hard") {
-                difficulty = GeneratorDataV2::DifficultyPreset::SmallHard;
+                difficulty = GeneratorData::DifficultyPreset::SmallHard;
             } else if (d == "easy") {
-                difficulty = GeneratorDataV2::DifficultyPreset::Easy;
+                difficulty = GeneratorData::DifficultyPreset::Easy;
             } else if (d == "medium") {
-                difficulty = GeneratorDataV2::DifficultyPreset::Medium;
+                difficulty = GeneratorData::DifficultyPreset::Medium;
             } else if (d == "hard") {
-                difficulty = GeneratorDataV2::DifficultyPreset::Hard;
+                difficulty = GeneratorData::DifficultyPreset::Hard;
             }
         } else if (a.rfind("--method-threads=", 0) == 0) {
             method_threads = static_cast<size_t>(std::stoull(a.substr(17)));
@@ -897,7 +899,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    GeneratorDataV2 generator(difficulty);
+    GeneratorData generator(difficulty);
     std::map<std::string, Metric> metrics;
 
     std::ofstream csv_long(kLongCsvPath);

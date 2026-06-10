@@ -17,6 +17,7 @@ public:
     static void Check(const ProblemData* data);
 
 private:
+    static bool IsAppointed(const Operation& operation);
     static void CheckAncestors(const Operation& operation,
                                const ProblemData* data);
     static uint64_t GetCheckTime(size_t id_op, const ProblemData* data);
@@ -31,10 +32,6 @@ void SolutionChecker::Check(const ProblemData* data) {
     }
 
     // все ли операции назначены
-    for (const auto& operation : data->operations) {
-        operation.CheckAppointment();
-    }
-
     // правильный порядок выполнения
     for (const auto& operation : data->operations) {
         CheckAncestors(operation, data);
@@ -44,8 +41,11 @@ void SolutionChecker::Check(const ProblemData* data) {
     // проверка возможности выполнения
     // проверка на выполнение непрерываемой операции в 1 заход
     for (size_t i = 0; i < data->operations.size(); ++i) {
-        uint64_t time = GetCheckTime(i, data);
         const auto& operation = data->operations[i];
+        if (!IsAppointed(operation)) {
+            continue;
+        }
+        uint64_t time = GetCheckTime(i, data);
         if (!operation.stoppable &&
             operation.end_time - operation.start_time != time) {
             throw std::runtime_error("Вы прерывали непрерываемую опреацию #" +
@@ -54,10 +54,22 @@ void SolutionChecker::Check(const ProblemData* data) {
     }
 }
 
+bool SolutionChecker::IsAppointed(const Operation& operation) {
+    return operation.start_time != 0 && operation.end_time != 0;
+}
+
 void SolutionChecker::CheckAncestors(const Operation& operation,
                                      const ProblemData* data) {
+    if (!IsAppointed(operation)) {
+        return;
+    }
     for (size_t prev : operation.previous_op_id) {
         const auto& prev_op = data->operations[prev];
+        if (!IsAppointed(prev_op)) {
+            throw std::runtime_error("Previous operation #" +
+                                     std::to_string(prev) +
+                                     " is not appointed");
+        }
         if (prev_op.end_time > operation.start_time) {
             throw std::runtime_error("Предудыщая операция #" +
                                      std::to_string(prev) +
